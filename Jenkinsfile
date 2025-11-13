@@ -61,20 +61,6 @@ pipeline {
             }
         }
 
-        stage('Clean TTP Configs (Android)') {
-            when { expression { params.BUILD_TARGET == 'Android' || params.BUILD_TARGET == 'Both Android iOS' } }
-            steps {
-                sh '''
-                if [ -d "${PROJECT_PATH}/Assets/StreamingAssets/ttp/configurations" ]; then
-                  echo "🧹 Clearing TTP configurations for Android..."
-                  rm -rf "${PROJECT_PATH}/Assets/StreamingAssets/ttp/configurations/"*
-                else
-                  echo "ℹ️ No TTP configuration folder found for Android."
-                fi
-                '''
-            }
-        }
-
         stage('Build Android') {
             when { expression { params.BUILD_TARGET == 'Android' || params.BUILD_TARGET == 'Both Android iOS' } }
             environment {
