@@ -102,8 +102,7 @@ pipeline {
             when { expression { params.BUILD_TARGET == 'Android' || params.BUILD_TARGET == 'Both Android iOS' } }
             steps {
                 script {
-                    def relativePath = PROJECT_PATH == env.WORKSPACE ? '' : PROJECT_PATH - "${env.WORKSPACE}/"
-                    def logPath = relativePath ? "${relativePath}/unity_build_log_android.txt" : "unity_build_log_android.txt"
+                    def logPath = "unity_build_log_android.txt"
                     archiveArtifacts artifacts: logPath, fingerprint: true, allowEmptyArchive: true
                 }
             }
@@ -131,20 +130,6 @@ pipeline {
             }
         }
 
-        stage('Clean TTP Configs (iOS)') {
-            when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
-            steps {
-                sh '''
-                if [ -d "${PROJECT_PATH}/Assets/StreamingAssets/ttp/configurations" ]; then
-                  echo "🧹 Clearing TTP configurations for iOS..."
-                  rm -rf "${PROJECT_PATH}/Assets/StreamingAssets/ttp/configurations/"*
-                else
-                  echo "ℹ️ No TTP configuration folder found for iOS."
-                fi
-                '''
-            }
-        }
-
         stage('Build iOS') {
             when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
             environment { DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}" }
@@ -162,7 +147,7 @@ pipeline {
             steps {
                 script {
                     def relativePath = PROJECT_PATH == env.WORKSPACE ? '' : PROJECT_PATH - "${env.WORKSPACE}/"
-                    def logPath = relativePath ? "${relativePath}/unity_build_log_ios.txt" : "unity_build_log_ios.txt"
+                    def logPath = "unity_build_log_ios.txt"
                     archiveArtifacts artifacts: logPath, fingerprint: true, allowEmptyArchive: true
                 }
             }
@@ -171,11 +156,15 @@ pipeline {
         stage('Pod Install') {
             when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
             steps {
-                sh '''\
-                echo "📦 Running pod install..."
-                cd "${PROJECT_PATH}/Builds/iOS"
-                LANG=en_US.UTF-8 /Users/zenga_mac_mini_m4/.gem/ruby/3.4.0/bin/pod install --repo-update
-                echo "✅ pod install completed."
+                sh '''
+                    echo "📦 Running pod install..."
+                    POD=$(which pod)
+                    echo "Using pod at: $POD"
+
+                    cd "${PROJECT_PATH}/Builds/iOS"
+                    LANG=en_US.UTF-8 $POD install --repo-update
+
+                    echo "✅ pod install completed."
                 '''
             }
         }
@@ -328,8 +317,7 @@ pipeline {
             when { expression { params.BUILD_TARGET == 'MacOS' || params.BUILD_TARGET == 'Both MacOS Windows' } }
             steps {
                 script {
-                    def relativePath = PROJECT_PATH == env.WORKSPACE ? '' : PROJECT_PATH - "${env.WORKSPACE}/"
-                    def logPath = relativePath ? "${relativePath}/unity_build_log_macos.txt" : "unity_build_log_macos.txt"
+                    def logPath = "unity_build_log_macos.txt"
                     archiveArtifacts artifacts: logPath, fingerprint: true, allowEmptyArchive: true
                 }
             }
@@ -368,8 +356,7 @@ pipeline {
             when { expression { params.BUILD_TARGET == 'Windows' || params.BUILD_TARGET == 'Both MacOS Windows' } }
             steps {
                 script {
-                    def relativePath = PROJECT_PATH == env.WORKSPACE ? '' : PROJECT_PATH - "${env.WORKSPACE}/"
-                    def logPath = relativePath ? "${relativePath}/unity_build_log_windows.txt" : "unity_build_log_windows.txt"
+                    def logPath = "unity_build_log_windows.txt"
                     archiveArtifacts artifacts: logPath, fingerprint: true, allowEmptyArchive: true
                 }
             }
