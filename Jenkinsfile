@@ -181,7 +181,22 @@ pipeline {
             steps {
                 sh '''
                 echo "🔨 Archiving Xcode project..."
-                xcodebuild -workspace "${PROJECT_PATH}/Builds/iOS/Unity-iPhone.xcworkspace" -scheme Unity-iPhone -configuration Release -sdk iphoneos -archivePath "${PROJECT_PATH}/Builds/iOS/build.xcarchive" archive
+
+                IOS_PATH="${PROJECT_PATH}/Builds/iOS"
+                WORKSPACE_PATH="$IOS_PATH/Unity-iPhone.xcworkspace"
+                PROJECT_PATH_XCODE="$IOS_PATH/Unity-iPhone.xcodeproj"
+                ARCHIVE_PATH="$IOS_PATH/build.xcarchive"
+
+                if [ -d "$WORKSPACE_PATH" ]; then
+                    echo "📁 Found xcworkspace. Using workspace build..."
+                    xcodebuild -workspace "$WORKSPACE_PATH" -scheme Unity-iPhone -configuration Release -sdk iphoneos -archivePath "$ARCHIVE_PATH" archive
+                elif [ -d "$PROJECT_PATH_XCODE" ]; then
+                    echo "📁 No xcworkspace found. Falling back to xcodeproj..."
+                    xcodebuild -project "$PROJECT_PATH_XCODE" -scheme Unity-iPhone -configuration Release -sdk iphoneos -archivePath "$ARCHIVE_PATH" archive
+                else
+                    echo "❌ ERROR: Neither .xcworkspace nor .xcodeproj found!"
+                    exit 1
+                fi
                 '''
             }
         }
