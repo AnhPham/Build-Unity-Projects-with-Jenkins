@@ -160,7 +160,17 @@ pipeline {
                 sh '''\
                 echo "📦 Running pod install..."
                 cd "${PROJECT_PATH}/Builds/iOS"
+
+                # Kiểm tra Podfile tồn tại
+                if [ ! -f "Podfile" ]; then
+                    echo "⚠️  No Podfile found. Skipping pod install."
+                    exit 0
+                fi
+
+                # Nếu có Podfile thì mới chạy pod install
+                echo "📄 Podfile found. Running pod install..."
                 LANG=en_US.UTF-8 ${POD_PATH} install --repo-update
+
                 echo "✅ pod install completed."
                 '''
             }
