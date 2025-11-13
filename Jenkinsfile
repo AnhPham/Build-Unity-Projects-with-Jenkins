@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         UNITY_PATH = '/Applications/Unity/Hub/Editor/2022.3.62f2/Unity.app/Contents/MacOS/Unity'
-        PROJECT_PATH = "${env.WORKSPACE}"
+        PROJECT_PATH = "${env.WORKSPACE}/UnityJenkins"
         BUILD_METHOD_ANDROID = 'BuildScript.BuildAndroid'
         BUILD_METHOD_IOS = 'BuildScript.BuildiOS'
         BUILD_METHOD_MACOS = 'BuildScript.BuildMacOS'
