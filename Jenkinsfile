@@ -10,6 +10,7 @@ pipeline {
         BUILD_METHOD_WINDOWS = 'BuildScript.BuildWindows'
         KEYSTORE_PASS = 'unityjenkins'
         KEY_ALIAS_PASS = 'unityjenkins'
+        POD_PATH = '/Users/anhpham/.gem/ruby/2.6.0/bin/pod'
     }
 
     parameters {
@@ -156,15 +157,11 @@ pipeline {
         stage('Pod Install') {
             when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
             steps {
-                sh '''
-                    echo "📦 Running pod install..."
-                    POD=$(which pod)
-                    echo "Using pod at: $POD"
-
-                    cd "${PROJECT_PATH}/Builds/iOS"
-                    LANG=en_US.UTF-8 $POD install --repo-update
-
-                    echo "✅ pod install completed."
+                sh '''\
+                echo "📦 Running pod install..."
+                cd "${PROJECT_PATH}/Builds/iOS"
+                LANG=en_US.UTF-8 ${POD_PATH} install --repo-update
+                echo "✅ pod install completed."
                 '''
             }
         }
