@@ -164,6 +164,7 @@ PlayerSettings:
   androidMaxAspectRatio: 2.1
   applicationIdentifier:
     Android: com.unityjenkins.demo
+    Standalone: com.unityjenkins.demo
     iPhone: com.unityjenkins.demo
   buildNumber:
     Standalone: 0
@@ -841,7 +842,10 @@ PlayerSettings:
   webGLMemoryGeometricGrowthStep: 0.2
   webGLMemoryGeometricGrowthCap: 96
   webGLPowerPreference: 2
-  scriptingDefineSymbols: {}
+  scriptingDefineSymbols:
+    Android: A
+    Standalone: A
+    iPhone: A
   additionalCompilerArguments: {}
   platformArchitecture: {}
   scriptingBackend:

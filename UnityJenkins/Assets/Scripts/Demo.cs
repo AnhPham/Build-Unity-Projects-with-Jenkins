@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 using UnityEngine.UI;
@@ -6,16 +7,16 @@ public class Demo : MonoBehaviour
 {
     void Start()
     {
-        var text = string.Empty;
+        var list = new List<string>();
 #if A
-        text += "A";
+        list.Add("A");
 #endif
 #if B
-        text += "B";
+        list.Add("B");
 #endif
 #if C
-        text += "C";
+        list.Add("C");
 #endif
-        GetComponent<Text>().text = "Scripting Define Symbols: " + text;
+        GetComponent<Text>().text = "Scripting Define Symbols: " + string.Join(',', list);
     }
 }
