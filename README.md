@@ -131,7 +131,11 @@ Place the file in:
 
 ---
 
-# Step 8: Build  
+# Step 8: Commit and push to **develop** branch
+
+---
+
+# Step 9: Try to Android build on Jenkins
 1. Open http://localhost:8080  
 2. Select your build job  
 3. Click **Build with Parameters**  
@@ -191,11 +195,14 @@ Edit **ExportOptions_Adhoc.plist** and replace the following values using the Ad
 </p>
 
 Do the same for **ExportOptions_Prod.plist** using the App Store provision.  
-Push changes to the **develop** branch.
 
 ---
 
-## Step 5 — Test iOS Build on Jenkins
+## Step 5: Commit and push to **develop** branch
+
+---
+
+## Step 6 — Try to iOS build on Jenkins
 1. Open http://localhost:8080  
 2. Select your build job  
 3. Click **Build with Parameters**  
@@ -203,7 +210,9 @@ Push changes to the **develop** branch.
    - `BUILD_TARGET = iOS`
 5. Click **Build**
 
-**Note:** To build any branch, that branch must contain all **4 required files**:  
+---
+
+**NOTE:** To build any branch, that branch must contain all **4 required files**:  
 - `Jenkinsfile`  
 - `ExportOptions_Adhoc.plist`  
 - `ExportOptions_Prod.plist`  
