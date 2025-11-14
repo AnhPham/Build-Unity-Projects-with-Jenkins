@@ -1,16 +1,22 @@
 # Jenkins Setup Guide for Unity CI/CD
 
-### **Step 1:** Install Jenkins  
+## General Setup
+
+# **Step 1:** Install Jenkins  
 ```bash
 brew install jenkins-lts
 ```
 
-### **Step 2:** Start Jenkins  
+---
+
+# **Step 2:** Start Jenkins  
 ```bash
 brew services start jenkins-lts
 ```
 
-### **Step 3:** Open Jenkins  
+---
+
+# **Step 3:** Open Jenkins  
 Visit:  
 👉 http://localhost:8080  
 Follow the on-screen instructions.
@@ -135,5 +141,56 @@ Place the file in:
 
 ---
 
-### **Note:**  
-iOS Setup Guide will be updated soon.
+# iOS Build Setup
+
+## Step 1  
+Obtain the two `.mobileprovision` files (Adhoc / App Store) from the responsible person.
+
+## Step 2  
+Double-click both files on the build machine to import them (if not already imported).  
+Record the information from the Adhoc provision: name, bundle ID, team ID, UUID.
+
+Example:  
+- **Provision Name:** Escape adhoc  
+- **Bundle ID:** com.teamhoppi.escape.game.no1  
+- **Team ID:** V9F8PB86RM  
+- **UUID:** 1c1bc01b-c95f-43c6-b1b2-5dc6f6919a36  
+
+Do the same for the App Store provision.
+
+---
+
+## Step 3 — Unity Project Setup  
+Go to: **Edit → Project Settings → Player → Other Settings**
+
+### Identification
+- **Signing Team ID:** Enter the Team ID (Adhoc) saved in Step 2  
+- **Automatically Sign:** Off  
+
+### iOS Provisioning Profile
+- **Profile ID:** Enter the UUID (Adhoc) saved in Step 2  
+- **Profile Type:** Distribution  
+
+---
+
+## Step 4 — Setup .plist Files  
+Copy `ExportOptions_Adhoc.plist` and `ExportOptions_Prod.plist` into the root directory of the Git project.
+
+Edit **ExportOptions_Adhoc.plist** and replace the following values using the Adhoc provision data from Step 2:
+- Team ID  
+- Bundle ID  
+- Provisioning profile name  
+
+Do the same for **ExportOptions_Prod.plist** using the App Store provision.  
+Push changes to the **develop** branch.
+
+---
+
+## Step 5 — Test iOS Build on Jenkins  
+**Note:** To build any branch, that branch must contain all **5 required files**:  
+- `Jenkinsfile`  
+- `ExportOptions_Adhoc.plist`  
+- `ExportOptions_Prod.plist`  
+- `BuildScript.cs`  
+
+This means you can only build branches that are created from `develop` or have already merged `develop` into them.
