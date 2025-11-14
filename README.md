@@ -1,7 +1,7 @@
 # Jenkins Setup Guide for Unity CI/CD
 
 <p align="center">
-  <img width="1000px" src="/Guides/BuildWithParams.png?raw=true" alt="Guides">
+  <img width="1000px" src="/Guides/BuildWithParameters.png?raw=true" alt="Guides">
 </p>
 
 ## General Setup
