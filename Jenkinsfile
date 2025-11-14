@@ -20,6 +20,7 @@ pipeline {
         choice(name: 'BUILD_ANDROID_FORMAT', choices: ['APK', 'AAB', 'Both'], description: 'Build APK, AAB or both')
         choice(name: 'BUILD_IOS_FORMAT', choices: ['AdHoc', 'AppStore', 'Both'], description: 'Build AdHoc, AppStore or both')
         booleanParam(name: 'DEVELOPMENT_BUILD', defaultValue: false, description: 'Toggle Development Build, Deep Profiling Support, Autoconnect Profiler.')
+        string(name: 'SCRIPTING_DEFINE_SYMBOLS', defaultValue: '', description: 'Scripting defines symbols separated by commas')
     }
 
     options { timestamps() }
@@ -67,6 +68,7 @@ pipeline {
             environment {
                 BUILD_ANDROID_FORMAT = "${params.BUILD_ANDROID_FORMAT}"
                 DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}"
+                SCRIPTING_DEFINE_SYMBOLS = "${params.SCRIPTING_DEFINE_SYMBOLS}"
             }
             steps {
                 sh '''
@@ -133,7 +135,10 @@ pipeline {
 
         stage('Build iOS') {
             when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
-            environment { DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}" }
+            environment {
+                DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}"
+                SCRIPTING_DEFINE_SYMBOLS = "${params.SCRIPTING_DEFINE_SYMBOLS}"
+            }
             steps {
                 sh '''
                 echo "🔨 Starting Unity iOS build..."
@@ -323,7 +328,10 @@ pipeline {
 
         stage('Build MacOS') {
             when { expression { params.BUILD_TARGET == 'MacOS' || params.BUILD_TARGET == 'Both MacOS Windows' } }
-            environment { DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}" }
+            environment {
+                DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}"
+                SCRIPTING_DEFINE_SYMBOLS = "${params.SCRIPTING_DEFINE_SYMBOLS}"
+            }
             steps {
                 sh '''
                 echo "🔨 Starting Unity MacOS build..."
@@ -362,7 +370,10 @@ pipeline {
 
         stage('Build Windows') {
             when { expression { params.BUILD_TARGET == 'Windows' || params.BUILD_TARGET == 'Both MacOS Windows' } }
-            environment { DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}" }
+            environment {
+                DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}"
+                SCRIPTING_DEFINE_SYMBOLS = "${params.SCRIPTING_DEFINE_SYMBOLS}"
+            }
             steps {
                 sh '''
                 echo "🔨 Starting Unity Windows build..."

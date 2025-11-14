@@ -113,9 +113,52 @@ public class BuildScript
         return opts;
     }
 
+    private static void ApplyScriptingDefineSymbols(BuildTargetGroup targetGroup)
+    {
+        string symbolsEnv = System.Environment.GetEnvironmentVariable("SCRIPTING_DEFINE_SYMBOLS");
+        
+        if (string.IsNullOrEmpty(symbolsEnv))
+        {
+            Debug.Log("ℹ️ SCRIPTING_DEFINE_SYMBOLS is empty, skipping scripting define symbols update.");
+            return;
+        }
+
+        // Get current scripting define symbols
+        string currentSymbols = PlayerSettings.GetScriptingDefineSymbolsForGroup(targetGroup);
+        string[] currentSymbolsArray = string.IsNullOrEmpty(currentSymbols) 
+            ? new string[0] 
+            : currentSymbols.Split(';').Where(s => !string.IsNullOrWhiteSpace(s)).ToArray();
+
+        // Parse new symbols from environment variable (comma or semicolon separated)
+        string[] newSymbolsArray = symbolsEnv
+            .Split(new char[] { ',', ';' }, System.StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim())
+            .Where(s => !string.IsNullOrEmpty(s))
+            .ToArray();
+
+        if (newSymbolsArray.Length == 0)
+        {
+            Debug.Log("ℹ️ No valid scripting define symbols found in SCRIPTING_DEFINE_SYMBOLS.");
+            return;
+        }
+
+        // Merge current and new symbols, removing duplicates
+        var allSymbols = currentSymbolsArray.Union(newSymbolsArray).Distinct().OrderBy(s => s).ToArray();
+        string mergedSymbols = string.Join(";", allSymbols);
+
+        // Apply the merged symbols
+        PlayerSettings.SetScriptingDefineSymbolsForGroup(targetGroup, mergedSymbols);
+        
+        Debug.Log($"✅ Applied Scripting Define Symbols for {targetGroup}:");
+        Debug.Log($"   Current: {(string.IsNullOrEmpty(currentSymbols) ? "(none)" : currentSymbols)}");
+        Debug.Log($"   New: {string.Join(", ", newSymbolsArray)}");
+        Debug.Log($"   Merged: {mergedSymbols}");
+    }
+
     [MenuItem("Jenkins/Build Android")]
     public static void BuildAndroid()
     {
+        ApplyScriptingDefineSymbols(BuildTargetGroup.Android);
         BuildAddressables();
 
         string buildFormat = System.Environment.GetEnvironmentVariable("BUILD_ANDROID_FORMAT") ?? "APK";
@@ -188,6 +231,7 @@ public class BuildScript
     [MenuItem("Jenkins/Build iOS")]
     public static void BuildiOS()
     {
+        ApplyScriptingDefineSymbols(BuildTargetGroup.iOS);
         BuildAddressables();
 
         string buildPath = "Builds/iOS";
@@ -220,6 +264,7 @@ public class BuildScript
     [MenuItem("Jenkins/Build MacOS")]
     public static void BuildMacOS()
     {
+        ApplyScriptingDefineSymbols(BuildTargetGroup.Standalone);
         BuildAddressables();
 
         string buildPath = "Builds/MacOS/" + Application.productName;
@@ -252,6 +297,7 @@ public class BuildScript
     [MenuItem("Jenkins/Build Windows")]
     public static void BuildWindows()
     {
+        ApplyScriptingDefineSymbols(BuildTargetGroup.Standalone);
         BuildAddressables();
 
         string buildPath = "Builds/Windows/" + Application.productName + ".exe";
