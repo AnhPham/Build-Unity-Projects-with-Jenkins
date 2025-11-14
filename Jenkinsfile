@@ -94,7 +94,7 @@ pipeline {
                 
                 if [ -n "${SCRIPTING_DEFINE_SYMBOLS}" ]; then
                   # Sanitize SCRIPTING_DEFINE_SYMBOLS: replace commas/semicolons with underscore, remove special chars
-                  SYMBOLS_PREFIX=$(echo "${SCRIPTING_DEFINE_SYMBOLS}" | sed 's/[,;]/_/g' | sed 's/[^a-zA-Z0-9_]/_/g' | sed 's/__*/_/g' | sed 's/^_\|_$//g')
+                  SYMBOLS_PREFIX=$(echo "${SCRIPTING_DEFINE_SYMBOLS}" | sed 's/[,;]/_/g' | sed 's/[^a-zA-Z0-9_]/_/g' | sed 's/__*/_/g' | sed 's/^_//' | sed 's/_$//')
                   if [ -n "$SYMBOLS_PREFIX" ]; then
                     PREFIX="${SYMBOLS_PREFIX}_${PREFIX}"
                   fi
@@ -417,7 +417,7 @@ pipeline {
                 
                 if [ -n "${SCRIPTING_DEFINE_SYMBOLS}" ]; then
                   # Sanitize SCRIPTING_DEFINE_SYMBOLS: replace commas/semicolons with underscore, remove special chars
-                  SYMBOLS_PREFIX=$(echo "${SCRIPTING_DEFINE_SYMBOLS}" | sed 's/[,;]/_/g' | sed 's/[^a-zA-Z0-9_]/_/g' | sed 's/__*/_/g' | sed 's/^_\|_$//g')
+                  SYMBOLS_PREFIX=$(echo "${SCRIPTING_DEFINE_SYMBOLS}" | sed 's/[,;]/_/g' | sed 's/[^a-zA-Z0-9_]/_/g' | sed 's/__*/_/g' | sed 's/^_//' | sed 's/_$//')
                   if [ -n "$SYMBOLS_PREFIX" ]; then
                     PREFIX="${SYMBOLS_PREFIX}_${PREFIX}"
                   fi
@@ -473,7 +473,7 @@ pipeline {
                 
                 if [ -n "${SCRIPTING_DEFINE_SYMBOLS}" ]; then
                   # Sanitize SCRIPTING_DEFINE_SYMBOLS: replace commas/semicolons with underscore, remove special chars
-                  SYMBOLS_PREFIX=$(echo "${SCRIPTING_DEFINE_SYMBOLS}" | sed 's/[,;]/_/g' | sed 's/[^a-zA-Z0-9_]/_/g' | sed 's/__*/_/g' | sed 's/^_\|_$//g')
+                  SYMBOLS_PREFIX=$(echo "${SCRIPTING_DEFINE_SYMBOLS}" | sed 's/[,;]/_/g' | sed 's/[^a-zA-Z0-9_]/_/g' | sed 's/__*/_/g' | sed 's/^_//' | sed 's/_$//')
                   if [ -n "$SYMBOLS_PREFIX" ]; then
                     PREFIX="${SYMBOLS_PREFIX}_${PREFIX}"
                   fi
