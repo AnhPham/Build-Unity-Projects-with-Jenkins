@@ -1,5 +1,9 @@
 # Jenkins Setup Guide for Unity CI/CD
 
+<p align="center">
+  <img width="500px" src="/Guides/BuildWithParams.png?raw=true" alt="Guides">
+</p>
+
 ## General Setup
 
 # **Step 1:** Install Jenkins  
