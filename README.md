@@ -1,7 +1,7 @@
 # Jenkins Setup Guide for Unity CI/CD
 
 <p align="center">
-  <img width="500px" src="/Guides/BuildWithParams.png?raw=true" alt="Guides">
+  <img width="1000px" src="/Guides/BuildWithParams.png?raw=true" alt="Guides">
 </p>
 
 ## General Setup
@@ -161,7 +161,7 @@ Get the data from the Adhoc provision: provision name, bundle ID, team ID, UUID.
 Example:
 
 <p align="center">
-  <img width="500px" src="/Guides/ProvisioningGuide.png?raw=true" alt="Guides">
+  <img width="1000px" src="/Guides/ProvisioningGuide.png?raw=true" alt="Guides">
 </p>
 
 - **Provision Name:** Unity Jenkins Demo Adhoc  
@@ -195,7 +195,7 @@ Edit **ExportOptions_Adhoc.plist** and replace the following values using the Ad
 - Provisioning Name
 
 <p align="center">
-  <img width="500px" src="/Guides/PListGuide.png?raw=true" alt="Guides">
+  <img width="1000px" src="/Guides/PListGuide.png?raw=true" alt="Guides">
 </p>
 
 Do the same for **ExportOptions_Prod.plist** using the App Store provision.  
