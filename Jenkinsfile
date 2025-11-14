@@ -81,21 +81,37 @@ pipeline {
 
         stage('Tag Android Output Name if DEV') {
             when { expression { params.BUILD_TARGET == 'Android' || params.BUILD_TARGET == 'Both Android iOS' } }
-            environment { DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}" }
+            environment {
+                DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}"
+                SCRIPTING_DEFINE_SYMBOLS = "${params.SCRIPTING_DEFINE_SYMBOLS}"
+            }
             steps {
                 sh '''
+                PREFIX=""
                 if [ "${DEVELOPMENT_BUILD}" = "true" ]; then
-                  echo "🏷️ Prefixing Android artifacts with DEV_BUILD_ ..."
+                  PREFIX="DEV_BUILD_"
+                fi
+                
+                if [ -n "${SCRIPTING_DEFINE_SYMBOLS}" ]; then
+                  # Sanitize SCRIPTING_DEFINE_SYMBOLS: replace commas/semicolons with underscore, remove special chars
+                  SYMBOLS_PREFIX=$(echo "${SCRIPTING_DEFINE_SYMBOLS}" | sed 's/[,;]/_/g' | sed 's/[^a-zA-Z0-9_]/_/g' | sed 's/__*/_/g' | sed 's/^_\|_$//g')
+                  if [ -n "$SYMBOLS_PREFIX" ]; then
+                    PREFIX="${SYMBOLS_PREFIX}_${PREFIX}"
+                  fi
+                fi
+                
+                if [ -n "$PREFIX" ]; then
+                  echo "🏷️ Prefixing Android artifacts with ${PREFIX} ..."
                   for f in "${PROJECT_PATH}/Builds/Android/"*.apk "${PROJECT_PATH}/Builds/Android/"*.aab; do
                     [ -e "$f" ] || continue
                     base="$(basename "$f")"
                     dir="$(dirname "$f")"
-                    if [[ "$base" != DEV_BUILD_* ]]; then
-                      mv "$f" "${dir}/DEV_BUILD_${base}"
+                    if [[ "$base" != ${PREFIX}* ]]; then
+                      mv "$f" "${dir}/${PREFIX}${base}"
                     fi
                   done
                 else
-                  echo "ℹ️ DEVELOPMENT_BUILD=false, skip prefix."
+                  echo "ℹ️ No prefix to apply."
                 fi
                 '''
             }
@@ -226,7 +242,23 @@ pipeline {
                     def appName = rawAppName.replaceAll('[^a-zA-Z0-9_-]', '')
                     def version = sh(script: "/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \"${PROJECT_PATH}/Builds/iOS/Info.plist\"", returnStdout: true).trim()
                     def datetime = sh(script: "TZ='Asia/Bangkok' date '+%d-%m-%Y-%H-%M-%S'", returnStdout: true).trim()
-                    def prefix = params.DEVELOPMENT_BUILD ? "DEV_BUILD_" : ""
+                    
+                    def prefix = ""
+                    if (params.DEVELOPMENT_BUILD) {
+                        prefix = "DEV_BUILD_"
+                    }
+                    
+                    if (params.SCRIPTING_DEFINE_SYMBOLS && params.SCRIPTING_DEFINE_SYMBOLS.trim()) {
+                        def symbolsPrefix = params.SCRIPTING_DEFINE_SYMBOLS
+                            .replaceAll(/[,;]/, '_')
+                            .replaceAll(/[^a-zA-Z0-9_]/, '_')
+                            .replaceAll(/_{2,}/, '_')
+                            .replaceAll(/^_|_$/, '')
+                        if (symbolsPrefix) {
+                            prefix = "${symbolsPrefix}_${prefix}"
+                        }
+                    }
+                    
                     def ipaName = "${prefix}${appName}_${version}_${datetime}_GMT+7_AdHoc.ipa"
                     echo "📦 Renaming ipa to: ${ipaName}"
                     sh """mv "${PROJECT_PATH}/Builds/iOS/ipa/${appName}.ipa" "${PROJECT_PATH}/Builds/iOS/ipa/${ipaName}" """
@@ -256,7 +288,23 @@ pipeline {
                     def appName = rawAppName.replaceAll('[^a-zA-Z0-9_-]', '')
                     def version = sh(script: "/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \"${PROJECT_PATH}/Builds/iOS/Info.plist\"", returnStdout: true).trim()
                     def datetime = sh(script: "TZ='Asia/Bangkok' date '+%d-%m-%Y-%H-%M-%S'", returnStdout: true).trim()
-                    def prefix = params.DEVELOPMENT_BUILD ? "DEV_BUILD_" : ""
+                    
+                    def prefix = ""
+                    if (params.DEVELOPMENT_BUILD) {
+                        prefix = "DEV_BUILD_"
+                    }
+                    
+                    if (params.SCRIPTING_DEFINE_SYMBOLS && params.SCRIPTING_DEFINE_SYMBOLS.trim()) {
+                        def symbolsPrefix = params.SCRIPTING_DEFINE_SYMBOLS
+                            .replaceAll(/[,;]/, '_')
+                            .replaceAll(/[^a-zA-Z0-9_]/, '_')
+                            .replaceAll(/_{2,}/, '_')
+                            .replaceAll(/^_|_$/, '')
+                        if (symbolsPrefix) {
+                            prefix = "${symbolsPrefix}_${prefix}"
+                        }
+                    }
+                    
                     def ipaName = "${prefix}${appName}_${version}_${datetime}_GMT+7_AppStore.ipa"
                     echo "📦 Renaming ipa to: ${ipaName}"
                     sh """mv "${PROJECT_PATH}/Builds/iOS/ipa/${appName}.ipa" "${PROJECT_PATH}/Builds/iOS/ipa/${ipaName}" """
@@ -353,15 +401,29 @@ pipeline {
 
         stage('Zip MacOS Build') {
             when { expression { params.BUILD_TARGET == 'MacOS' || params.BUILD_TARGET == 'Both MacOS Windows' } }
-            environment { DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}" }
+            environment {
+                DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}"
+                SCRIPTING_DEFINE_SYMBOLS = "${params.SCRIPTING_DEFINE_SYMBOLS}"
+            }
             steps {
                 sh '''
                 echo "📦 Zipping MacOS build..."
                 cd "${PROJECT_PATH}/Builds"
-                ZIPNAME="MacOSBuild.zip"
+                
+                PREFIX=""
                 if [ "${DEVELOPMENT_BUILD}" = "true" ]; then
-                  ZIPNAME="DEV_BUILD_MacOSBuild.zip"
+                  PREFIX="DEV_BUILD_"
                 fi
+                
+                if [ -n "${SCRIPTING_DEFINE_SYMBOLS}" ]; then
+                  # Sanitize SCRIPTING_DEFINE_SYMBOLS: replace commas/semicolons with underscore, remove special chars
+                  SYMBOLS_PREFIX=$(echo "${SCRIPTING_DEFINE_SYMBOLS}" | sed 's/[,;]/_/g' | sed 's/[^a-zA-Z0-9_]/_/g' | sed 's/__*/_/g' | sed 's/^_\|_$//g')
+                  if [ -n "$SYMBOLS_PREFIX" ]; then
+                    PREFIX="${SYMBOLS_PREFIX}_${PREFIX}"
+                  fi
+                fi
+                
+                ZIPNAME="${PREFIX}MacOSBuild.zip"
                 zip -r "${ZIPNAME}" MacOS
                 echo "✅ MacOS build zipped as ${ZIPNAME}."
                 '''
@@ -395,15 +457,29 @@ pipeline {
 
         stage('Zip Windows Build') {
             when { expression { params.BUILD_TARGET == 'Windows' || params.BUILD_TARGET == 'Both MacOS Windows' } }
-            environment { DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}" }
+            environment {
+                DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}"
+                SCRIPTING_DEFINE_SYMBOLS = "${params.SCRIPTING_DEFINE_SYMBOLS}"
+            }
             steps {
                 sh '''
                 echo "📦 Zipping Windows build..."
                 cd "${PROJECT_PATH}/Builds"
-                ZIPNAME="WindowsBuild.zip"
+                
+                PREFIX=""
                 if [ "${DEVELOPMENT_BUILD}" = "true" ]; then
-                  ZIPNAME="DEV_BUILD_WindowsBuild.zip"
+                  PREFIX="DEV_BUILD_"
                 fi
+                
+                if [ -n "${SCRIPTING_DEFINE_SYMBOLS}" ]; then
+                  # Sanitize SCRIPTING_DEFINE_SYMBOLS: replace commas/semicolons with underscore, remove special chars
+                  SYMBOLS_PREFIX=$(echo "${SCRIPTING_DEFINE_SYMBOLS}" | sed 's/[,;]/_/g' | sed 's/[^a-zA-Z0-9_]/_/g' | sed 's/__*/_/g' | sed 's/^_\|_$//g')
+                  if [ -n "$SYMBOLS_PREFIX" ]; then
+                    PREFIX="${SYMBOLS_PREFIX}_${PREFIX}"
+                  fi
+                fi
+                
+                ZIPNAME="${PREFIX}WindowsBuild.zip"
                 zip -r "${ZIPNAME}" Windows
                 echo "✅ Windows build zipped as ${ZIPNAME}."
                 '''
