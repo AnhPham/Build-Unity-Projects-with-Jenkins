@@ -1,7 +1,7 @@
 # Jenkins Setup Guide for Unity CI/CD
 
 <p align="center">
-  <img width="1000px" src="/Guides/BuildWithParameters.png?raw=true" alt="Guides">
+  <img width="1000px" src="/Guides/BuildWithParams.png?raw=true" alt="Guides">
 </p>
 
 ## General Setup
@@ -94,6 +94,11 @@ Enable **This project is parameterized**, then add:
 - **Name:** `DEVELOPMENT_BUILD`  
 - **Default:** `false`  
 - **Description:** Toggle Development Build, Autoconnect Profiler.
+
+### **String Parameter**
+- **Name:** `SCRIPTING_DEFINE_SYMBOLS`  
+- **Default:** ``  
+- **Description:** Scripting defines symbols separated by commas
 
 ---
 
