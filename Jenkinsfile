@@ -21,6 +21,7 @@ pipeline {
         choice(name: 'BUILD_IOS_FORMAT', choices: ['AdHoc', 'AppStore', 'Both'], description: 'Build AdHoc, AppStore or both')
         booleanParam(name: 'DEVELOPMENT_BUILD', defaultValue: false, description: 'Toggle Development Build, Autoconnect Profiler.')
         string(name: 'SCRIPTING_DEFINE_SYMBOLS', defaultValue: '', description: 'Scripting defines symbols separated by commas')
+        booleanParam(name: 'UPLOAD_TO_GOOGLE_DRIVE', defaultValue: false, description: 'Upload APK to Google Drive (katori.norikarin@gmail.com)')
     }
 
     options { timestamps() }
@@ -134,6 +135,218 @@ pipeline {
                     def relativePath = PROJECT_PATH == env.WORKSPACE ? '' : PROJECT_PATH - "${env.WORKSPACE}/"
                     def path = relativePath ? "${relativePath}/Builds/Android/*.apk, ${relativePath}/Builds/Android/*.aab" : "Builds/Android/*.apk, Builds/Android/*.aab"
                     archiveArtifacts artifacts: path, fingerprint: true
+                }
+            }
+        }
+
+        stage('Upload APK to Google Drive') {
+            when {
+                expression {
+                    return (params.BUILD_TARGET == 'Android' || params.BUILD_TARGET == 'Both Android iOS') && params.UPLOAD_TO_GOOGLE_DRIVE
+                }
+            }
+            steps {
+                script {
+                    echo "📤 Uploading APK files to Google Drive..."
+                    echo "📧 Target account: katori.norikarin@gmail.com"
+                    echo "📁 Target folder: Projects/Coffee Mania/Build"
+                    
+                    // Tìm tất cả các file APK trong thư mục Builds/Android
+                    def apkFiles = sh(
+                        script: "find '${PROJECT_PATH}/Builds/Android' -name '*.apk' -type f",
+                        returnStdout: true
+                    ).trim().split('\n').findAll { it }
+                    
+                    if (apkFiles.isEmpty()) {
+                        echo "⚠️ No APK files found to upload"
+                        return
+                    }
+                    
+                    echo "Found ${apkFiles.size()} APK file(s) to upload"
+                    
+                    // Credentials ID có thể được cấu hình qua environment variable
+                    // Mặc định: 'google-drive-service-account-json'
+                    def credentialsId = env.GOOGLE_DRIVE_CREDENTIALS_ID ?: 'google-drive-service-account-json'
+                    echo "ℹ️ Using credentials ID: ${credentialsId} (can be overridden with GOOGLE_DRIVE_CREDENTIALS_ID env var)"
+                    
+                    // Tạo Python script để upload lên Google Drive sử dụng service account
+                    def uploadScript = '''
+import os
+import sys
+import json
+
+try:
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+    from googleapiclient.errors import HttpError
+except ImportError:
+    print("Installing required packages...")
+    os.system(f"{sys.executable} -m pip install --quiet google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client")
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+    from googleapiclient.errors import HttpError
+
+SCOPES = ['https://www.googleapis.com/auth/drive']
+FOLDER_PATH = ["Projects", "Coffee Mania", "Build"]
+SERVICE_ACCOUNT_EMAIL = "katori.norikarin@gmail.com"
+
+def get_service_account_credentials():
+    """Lấy service account credentials từ file hoặc environment variable"""
+    # Thử lấy từ environment variable (JSON string)
+    service_account_json = os.environ.get('GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON')
+    if service_account_json:
+        try:
+            return json.loads(service_account_json)
+        except:
+            pass
+    
+    # Thử lấy từ file
+    service_account_file = os.environ.get('GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE', 'service_account.json')
+    if os.path.exists(service_account_file):
+        with open(service_account_file, 'r') as f:
+            return json.load(f)
+    
+    raise Exception("Service account credentials not found. Please set GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON or GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE")
+
+def authenticate():
+    """Authenticate với Google Drive sử dụng service account"""
+    try:
+        creds_info = get_service_account_credentials()
+        credentials = service_account.Credentials.from_service_account_info(
+            creds_info, scopes=SCOPES
+        )
+        return build('drive', 'v3', credentials=credentials)
+    except Exception as e:
+        raise Exception(f"Failed to authenticate: {str(e)}")
+
+def find_or_create_folder(service, parent_id, folder_name):
+    """Tìm hoặc tạo thư mục trong Google Drive"""
+    # Tìm thư mục
+    query = f"'{parent_id}' in parents and name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    results = service.files().list(q=query, fields="files(id, name)").execute()
+    items = results.get('files', [])
+    
+    if items:
+        return items[0]['id']
+    else:
+        # Tạo thư mục mới
+        file_metadata = {
+            'name': folder_name,
+            'mimeType': 'application/vnd.google-apps.folder',
+            'parents': [parent_id]
+        }
+        folder = service.files().create(body=file_metadata, fields='id').execute()
+        return folder.get('id')
+
+def upload_file(service, file_path, folder_id):
+    """Upload file lên Google Drive"""
+    file_name = os.path.basename(file_path)
+    print(f"📤 Uploading {file_name}...")
+    
+    file_metadata = {
+        'name': file_name,
+        'parents': [folder_id]
+    }
+    
+    media = MediaFileUpload(file_path, resumable=True)
+    file = service.files().create(
+        body=file_metadata,
+        media_body=media,
+        fields='id, webViewLink'
+    ).execute()
+    
+    print(f"✅ Successfully uploaded {file_name}")
+    print(f"   Link: {file.get('webViewLink')}")
+    return file.get('webViewLink')
+
+if __name__ == "__main__":
+    # Lấy danh sách file APK từ arguments
+    apk_files = sys.argv[1:]
+    
+    if not apk_files:
+        print("❌ No APK files provided")
+        sys.exit(1)
+    
+    try:
+        service = authenticate()
+        
+        # Bắt đầu từ root (My Drive)
+        current_folder_id = "root"
+        
+        # Tạo/tìm từng thư mục trong đường dẫn
+        for folder_name in FOLDER_PATH:
+            current_folder_id = find_or_create_folder(service, current_folder_id, folder_name)
+            print(f"📁 Found/Created folder: {folder_name}")
+        
+        # Upload từng file APK
+        for apk_file in apk_files:
+            if os.path.exists(apk_file):
+                upload_file(service, apk_file, current_folder_id)
+            else:
+                print(f"⚠️ File not found: {apk_file}")
+        
+        print("✅ All files uploaded successfully to Google Drive!")
+        
+    except Exception as e:
+        print(f"❌ Error uploading to Google Drive: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+'''
+                    
+                    // Lưu script vào file tạm
+                    writeFile file: 'upload_to_gdrive.py', text: uploadScript
+                    
+                    // Chạy script Python để upload
+                    def apkFilesStr = apkFiles.collect { "'${it}'" }.join(' ')
+                    
+                    // Thử sử dụng Jenkins Credentials Store trước, nếu không có thì dùng environment variables
+                    def uploadSuccess = false
+                    
+                    try {
+                        // Thử sử dụng Jenkins Credentials Store
+                        withCredentials([string(credentialsId: credentialsId, variable: 'GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON')]) {
+                            echo "✅ Using Jenkins Credentials Store"
+                            sh """
+                                python3 upload_to_gdrive.py ${apkFilesStr}
+                            """
+                            uploadSuccess = true
+                        }
+                    } catch (Exception e) {
+                        echo "ℹ️ Jenkins credentials not available, trying environment variables or file..."
+                        // Kiểm tra credentials từ environment variables hoặc file
+                        def hasCredentials = sh(
+                            script: 'test -n "$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON" || test -f "$GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE" || test -f "service_account.json"',
+                            returnStatus: true
+                        ) == 0
+                        
+                        if (!hasCredentials) {
+                            error("""
+⚠️ Google Drive credentials not found!
+
+Please configure one of the following:
+1. Jenkins Credentials Store:
+   - Add credentials with ID: ${credentialsId}
+   - Type: Secret text
+   - Value: JSON content from service account key file
+   
+2. Environment variable: GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON (JSON string)
+
+3. Environment variable: GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE (path to JSON file)
+
+4. File: service_account.json in workspace root
+
+See GOOGLE_DRIVE_SETUP.md for detailed instructions.
+                            """)
+                        }
+                        
+                        sh """
+                            python3 upload_to_gdrive.py ${apkFilesStr}
+                        """
+                        uploadSuccess = true
+                    }
                 }
             }
         }
