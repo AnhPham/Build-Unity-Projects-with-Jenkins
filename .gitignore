@@ -98,3 +98,10 @@ InitTestScene*.unity*
 
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
+
+# Google Drive OAuth credentials and tokens (DO NOT COMMIT!)
+credentials_oauth.json
+token.pickle
+token_base64.txt
+service_account.json
+upload_to_gdrive.py
