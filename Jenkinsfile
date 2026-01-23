@@ -50,6 +50,14 @@ pipeline {
                     branches: [[ name: "*/${params.BRANCH}" ]],
                     userRemoteConfigs: [[ url: "${env.GIT_PATH}" ]]
                 ])
+                
+                // Clean untracked files và reset về commit hiện tại
+                sh '''
+                    echo "🧹 Cleaning untracked files and resetting to HEAD..."
+                    git clean -fd
+                    git reset --hard HEAD
+                    echo "✅ Workspace cleaned and reset to HEAD"
+                '''
             }
         }
 
@@ -134,6 +142,327 @@ pipeline {
                 script {
                     def relativePath = PROJECT_PATH == env.WORKSPACE ? '' : PROJECT_PATH - "${env.WORKSPACE}/"
                     def path = relativePath ? "${relativePath}/Builds/Android/*.apk, ${relativePath}/Builds/Android/*.aab" : "Builds/Android/*.apk, Builds/Android/*.aab"
+                    archiveArtifacts artifacts: path, fingerprint: true
+                }
+            }
+        }
+
+        stage('Build iOS') {
+            when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
+            environment {
+                DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}"
+                SCRIPTING_DEFINE_SYMBOLS = "${params.SCRIPTING_DEFINE_SYMBOLS}"
+            }
+            steps {
+                sh '''
+                echo "🔨 Starting Unity iOS build..."
+                echo "⚙️ DEVELOPMENT_BUILD=${DEVELOPMENT_BUILD}"
+                ${UNITY_PATH} -quit -batchmode -nographics -projectPath "${PROJECT_PATH}" -logfile 'unity_build_log_ios.txt' -executeMethod ${BUILD_METHOD_IOS} -buildTarget ios
+                '''
+            }
+        }
+
+        stage('Archive Unity iOS Build Log') {
+            when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
+            steps {
+                script {
+                    def relativePath = PROJECT_PATH == env.WORKSPACE ? '' : PROJECT_PATH - "${env.WORKSPACE}/"
+                    def logPath = "unity_build_log_ios.txt"
+                    archiveArtifacts artifacts: logPath, fingerprint: true, allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('Pod Install') {
+            when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
+            steps {
+                sh '''\
+                echo "📦 Running pod install..."
+                cd "${PROJECT_PATH}/Builds/iOS"
+
+                if [ ! -f "Podfile" ]; then
+                    echo "⚠️  No Podfile found. Skipping pod install."
+                    exit 0
+                fi
+
+                echo "📄 Podfile found. Running pod install..."
+                LANG=en_US.UTF-8 ${POD_PATH} install --repo-update
+
+                echo "✅ pod install completed."
+                '''
+            }
+        }
+
+        stage('Archive Xcode Project') {
+            when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
+            steps {
+                sh '''
+                echo "🔨 Archiving Xcode project..."
+
+                IOS_PATH="${PROJECT_PATH}/Builds/iOS"
+                WORKSPACE_PATH="$IOS_PATH/Unity-iPhone.xcworkspace"
+                PROJECT_PATH_XCODE="$IOS_PATH/Unity-iPhone.xcodeproj"
+                ARCHIVE_PATH="$IOS_PATH/build.xcarchive"
+
+                if [ -d "$WORKSPACE_PATH" ]; then
+                    echo "📁 Found xcworkspace. Using workspace build..."
+                    xcodebuild -workspace "$WORKSPACE_PATH" -scheme Unity-iPhone -configuration Release -sdk iphoneos -archivePath "$ARCHIVE_PATH" archive
+                elif [ -d "$PROJECT_PATH_XCODE" ]; then
+                    echo "📁 No xcworkspace found. Falling back to xcodeproj..."
+                    xcodebuild -project "$PROJECT_PATH_XCODE" -scheme Unity-iPhone -configuration Release -sdk iphoneos -archivePath "$ARCHIVE_PATH" archive
+                else
+                    echo "❌ ERROR: Neither .xcworkspace nor .xcodeproj found!"
+                    exit 1
+                fi
+                '''
+            }
+        }
+
+        stage('Export IPA Adhoc') {
+            when {
+                expression { ((params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS') && (params.BUILD_IOS_FORMAT == 'AdHoc' || params.BUILD_IOS_FORMAT == 'Both')) }
+            }
+            steps {
+                sh '''
+                echo "🔨 Exporting IPA (Adhoc)..."
+                xcodebuild -exportArchive -archivePath "${PROJECT_PATH}/Builds/iOS/build.xcarchive" -exportOptionsPlist ExportOptions_Adhoc.plist -exportPath "${PROJECT_PATH}/Builds/iOS/ipa"
+                '''
+            }
+        }
+
+        stage('Rename IPA Adhoc') {
+            when {
+                expression { ((params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS') && (params.BUILD_IOS_FORMAT == 'AdHoc' || params.BUILD_IOS_FORMAT == 'Both')) }
+            }
+            steps {
+                script {
+                    def rawAppName = sh(script: "/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' \"${PROJECT_PATH}/Builds/iOS/Info.plist\"", returnStdout: true).trim()
+                    def appName = rawAppName.replaceAll('[^a-zA-Z0-9_-]', '')
+                    def version = sh(script: "/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \"${PROJECT_PATH}/Builds/iOS/Info.plist\"", returnStdout: true).trim()
+                    def datetime = sh(script: "TZ='Asia/Bangkok' date '+%d-%m-%Y-%H-%M-%S'", returnStdout: true).trim()
+                    
+                    def prefix = ""
+                    if (params.DEVELOPMENT_BUILD) {
+                        prefix = "DEV_BUILD_"
+                    }
+                    
+                    if (params.SCRIPTING_DEFINE_SYMBOLS && params.SCRIPTING_DEFINE_SYMBOLS.trim()) {
+                        def symbolsPrefix = params.SCRIPTING_DEFINE_SYMBOLS
+                            .replaceAll(/[,;]/, '_')
+                            .replaceAll(/[^a-zA-Z0-9_]/, '_')
+                            .replaceAll(/_{2,}/, '_')
+                            .replaceAll(/^_|_$/, '')
+                        if (symbolsPrefix) {
+                            prefix = "${symbolsPrefix}_${prefix}"
+                        }
+                    }
+                    
+                    def ipaName = "${prefix}${appName}_${version}_${datetime}_GMT+7_AdHoc.ipa"
+                    echo "📦 Renaming ipa to: ${ipaName}"
+                    sh """mv "${PROJECT_PATH}/Builds/iOS/ipa/${appName}.ipa" "${PROJECT_PATH}/Builds/iOS/ipa/${ipaName}" """
+                }
+            }
+        }
+
+        stage('Export IPA AppStore') {
+            when {
+                expression { ((params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS') && (params.BUILD_IOS_FORMAT == 'AppStore' || params.BUILD_IOS_FORMAT == 'Both')) }
+            }
+            steps {
+                sh '''
+                echo "🔨 Exporting IPA (AppStore)..."
+                xcodebuild -exportArchive -archivePath "${PROJECT_PATH}/Builds/iOS/build.xcarchive" -exportOptionsPlist ExportOptions_Prod.plist -exportPath "${PROJECT_PATH}/Builds/iOS/ipa"
+                '''
+            }
+        }
+
+        stage('Rename IPA AppStore') {
+            when {
+                expression { ((params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS') && (params.BUILD_IOS_FORMAT == 'AppStore' || params.BUILD_IOS_FORMAT == 'Both')) }
+            }
+            steps {
+                script {
+                    def rawAppName = sh(script: "/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' \"${PROJECT_PATH}/Builds/iOS/Info.plist\"", returnStdout: true).trim()
+                    def appName = rawAppName.replaceAll('[^a-zA-Z0-9_-]', '')
+                    def version = sh(script: "/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \"${PROJECT_PATH}/Builds/iOS/Info.plist\"", returnStdout: true).trim()
+                    def datetime = sh(script: "TZ='Asia/Bangkok' date '+%d-%m-%Y-%H-%M-%S'", returnStdout: true).trim()
+                    
+                    def prefix = ""
+                    if (params.DEVELOPMENT_BUILD) {
+                        prefix = "DEV_BUILD_"
+                    }
+                    
+                    if (params.SCRIPTING_DEFINE_SYMBOLS && params.SCRIPTING_DEFINE_SYMBOLS.trim()) {
+                        def symbolsPrefix = params.SCRIPTING_DEFINE_SYMBOLS
+                            .replaceAll(/[,;]/, '_')
+                            .replaceAll(/[^a-zA-Z0-9_]/, '_')
+                            .replaceAll(/_{2,}/, '_')
+                            .replaceAll(/^_|_$/, '')
+                        if (symbolsPrefix) {
+                            prefix = "${symbolsPrefix}_${prefix}"
+                        }
+                    }
+                    
+                    def ipaName = "${prefix}${appName}_${version}_${datetime}_GMT+7_AppStore.ipa"
+                    echo "📦 Renaming ipa to: ${ipaName}"
+                    sh """mv "${PROJECT_PATH}/Builds/iOS/ipa/${appName}.ipa" "${PROJECT_PATH}/Builds/iOS/ipa/${ipaName}" """
+                }
+            }
+        }
+
+        stage('Archive iOS IPA') {
+            when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
+            steps {
+                script {
+                    def relativePath = PROJECT_PATH == env.WORKSPACE ? '' : PROJECT_PATH - "${env.WORKSPACE}/"
+                    def path = relativePath ? "${relativePath}/Builds/iOS/ipa/*.ipa" : "Builds/iOS/ipa/*.ipa"
+                    archiveArtifacts artifacts: path, fingerprint: true
+                }
+            }
+        }
+
+        stage('Archive dSYMs if AppStore') {
+            when {
+                expression {
+                    return (params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS') &&
+                           (params.BUILD_IOS_FORMAT == 'AppStore' || params.BUILD_IOS_FORMAT == 'Both')
+                }
+            }
+            steps {
+                sh '''
+                echo "📦 Zipping dSYMs from build.xcarchive..."
+                ARCHIVE_PATH="${PROJECT_PATH}/Builds/iOS/build.xcarchive"
+                if [ -d "$ARCHIVE_PATH/dSYMs" ]; then
+                  cd "$ARCHIVE_PATH"
+                  zip -r dSYMs.zip dSYMs
+                  cp dSYMs.zip "${PROJECT_PATH}/Builds/iOS/dSYMs.zip"
+                else
+                  echo "❌ No dSYMs folder found in $ARCHIVE_PATH"
+                  exit 1
+                fi
+                '''
+                archiveArtifacts artifacts: 'Builds/iOS/dSYMs.zip', fingerprint: true
+            }
+        }
+
+        stage('Build MacOS') {
+            when { expression { params.BUILD_TARGET == 'MacOS' || params.BUILD_TARGET == 'Both MacOS Windows' } }
+            environment {
+                DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}"
+                SCRIPTING_DEFINE_SYMBOLS = "${params.SCRIPTING_DEFINE_SYMBOLS}"
+            }
+            steps {
+                sh '''
+                echo "🔨 Starting Unity MacOS build..."
+                echo "⚙️ DEVELOPMENT_BUILD=${DEVELOPMENT_BUILD}"
+                ${UNITY_PATH} -quit -batchmode -nographics -projectPath "${PROJECT_PATH}" -logfile 'unity_build_log_macos.txt' -executeMethod ${BUILD_METHOD_MACOS} -buildTarget osxuniversal
+                '''
+            }
+        }
+
+        stage('Archive Unity MacOS Build Log') {
+            when { expression { params.BUILD_TARGET == 'MacOS' || params.BUILD_TARGET == 'Both MacOS Windows' } }
+            steps {
+                script {
+                    def logPath = "unity_build_log_macos.txt"
+                    archiveArtifacts artifacts: logPath, fingerprint: true, allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('Zip MacOS Build') {
+            when { expression { params.BUILD_TARGET == 'MacOS' || params.BUILD_TARGET == 'Both MacOS Windows' } }
+            environment {
+                DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}"
+                SCRIPTING_DEFINE_SYMBOLS = "${params.SCRIPTING_DEFINE_SYMBOLS}"
+            }
+            steps {
+                sh '''
+                echo "📦 Zipping MacOS build..."
+                cd "${PROJECT_PATH}/Builds"
+                
+                PREFIX=""
+                if [ "${DEVELOPMENT_BUILD}" = "true" ]; then
+                  PREFIX="DEV_BUILD_"
+                fi
+                
+                if [ -n "${SCRIPTING_DEFINE_SYMBOLS}" ]; then
+                  # Sanitize SCRIPTING_DEFINE_SYMBOLS: replace commas/semicolons with underscore, remove special chars
+                  SYMBOLS_PREFIX=$(echo "${SCRIPTING_DEFINE_SYMBOLS}" | sed 's/[,;]/_/g' | sed 's/[^a-zA-Z0-9_]/_/g' | sed 's/__*/_/g' | sed 's/^_//' | sed 's/_$//')
+                  if [ -n "$SYMBOLS_PREFIX" ]; then
+                    PREFIX="${SYMBOLS_PREFIX}_${PREFIX}"
+                  fi
+                fi
+                
+                ZIPNAME="${PREFIX}MacOSBuild.zip"
+                zip -r "${ZIPNAME}" MacOS
+                echo "✅ MacOS build zipped as ${ZIPNAME}."
+                '''
+            }
+        }
+
+        stage('Build Windows') {
+            when { expression { params.BUILD_TARGET == 'Windows' || params.BUILD_TARGET == 'Both MacOS Windows' } }
+            environment {
+                DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}"
+                SCRIPTING_DEFINE_SYMBOLS = "${params.SCRIPTING_DEFINE_SYMBOLS}"
+            }
+            steps {
+                sh '''
+                echo "🔨 Starting Unity Windows build..."
+                echo "⚙️ DEVELOPMENT_BUILD=${DEVELOPMENT_BUILD}"
+                ${UNITY_PATH} -quit -batchmode -nographics -projectPath "${PROJECT_PATH}" -logfile 'unity_build_log_windows.txt' -executeMethod ${BUILD_METHOD_WINDOWS} -buildTarget win64
+                '''
+            }
+        }
+
+        stage('Archive Unity Windows Build Log') {
+            when { expression { params.BUILD_TARGET == 'Windows' || params.BUILD_TARGET == 'Both MacOS Windows' } }
+            steps {
+                script {
+                    def logPath = "unity_build_log_windows.txt"
+                    archiveArtifacts artifacts: logPath, fingerprint: true, allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('Zip Windows Build') {
+            when { expression { params.BUILD_TARGET == 'Windows' || params.BUILD_TARGET == 'Both MacOS Windows' } }
+            environment {
+                DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}"
+                SCRIPTING_DEFINE_SYMBOLS = "${params.SCRIPTING_DEFINE_SYMBOLS}"
+            }
+            steps {
+                sh '''
+                echo "📦 Zipping Windows build..."
+                cd "${PROJECT_PATH}/Builds"
+                
+                PREFIX=""
+                if [ "${DEVELOPMENT_BUILD}" = "true" ]; then
+                  PREFIX="DEV_BUILD_"
+                fi
+                
+                if [ -n "${SCRIPTING_DEFINE_SYMBOLS}" ]; then
+                  # Sanitize SCRIPTING_DEFINE_SYMBOLS: replace commas/semicolons with underscore, remove special chars
+                  SYMBOLS_PREFIX=$(echo "${SCRIPTING_DEFINE_SYMBOLS}" | sed 's/[,;]/_/g' | sed 's/[^a-zA-Z0-9_]/_/g' | sed 's/__*/_/g' | sed 's/^_//' | sed 's/_$//')
+                  if [ -n "$SYMBOLS_PREFIX" ]; then
+                    PREFIX="${SYMBOLS_PREFIX}_${PREFIX}"
+                  fi
+                fi
+                
+                ZIPNAME="${PREFIX}WindowsBuild.zip"
+                zip -r "${ZIPNAME}" Windows
+                echo "✅ Windows build zipped as ${ZIPNAME}."
+                '''
+            }
+        }
+
+        stage('Archive MacOS and Window ZIP') {
+            when { expression { params.BUILD_TARGET == 'MacOS' || params.BUILD_TARGET == 'Windows' || params.BUILD_TARGET == 'Both MacOS Windows' } }
+            steps {
+                script {
+                    def relativePath = PROJECT_PATH == env.WORKSPACE ? '' : PROJECT_PATH - "${env.WORKSPACE}/"
+                    def path = relativePath ? "${relativePath}/Builds/*.zip" : "Builds/*.zip"
                     archiveArtifacts artifacts: path, fingerprint: true
                 }
             }
@@ -508,376 +837,6 @@ See GOOGLE_DRIVE_SETUP.md for detailed instructions.
                         """
                     }
                 }
-            }
-        }
-
-        stage('Cleanup APK AAB Folders') {
-            when { expression { params.BUILD_TARGET == 'Android' || params.BUILD_TARGET == 'Both Android iOS' } }
-            steps {
-                sh '''
-                echo "🧹 Cleaning up APK AAB files in ${PROJECT_PATH}/Builds/Android/"
-                rm -f "${PROJECT_PATH}/Builds/Android/"*.apk "${PROJECT_PATH}/Builds/Android/"*.aab
-                echo "✅ APK AAB files cleaned up."
-                '''
-            }
-        }
-
-        stage('Build iOS') {
-            when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
-            environment {
-                DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}"
-                SCRIPTING_DEFINE_SYMBOLS = "${params.SCRIPTING_DEFINE_SYMBOLS}"
-            }
-            steps {
-                sh '''
-                echo "🔨 Starting Unity iOS build..."
-                echo "⚙️ DEVELOPMENT_BUILD=${DEVELOPMENT_BUILD}"
-                ${UNITY_PATH} -quit -batchmode -nographics -projectPath "${PROJECT_PATH}" -logfile 'unity_build_log_ios.txt' -executeMethod ${BUILD_METHOD_IOS} -buildTarget ios
-                '''
-            }
-        }
-
-        stage('Archive Unity iOS Build Log') {
-            when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
-            steps {
-                script {
-                    def relativePath = PROJECT_PATH == env.WORKSPACE ? '' : PROJECT_PATH - "${env.WORKSPACE}/"
-                    def logPath = "unity_build_log_ios.txt"
-                    archiveArtifacts artifacts: logPath, fingerprint: true, allowEmptyArchive: true
-                }
-            }
-        }
-
-        stage('Pod Install') {
-            when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
-            steps {
-                sh '''\
-                echo "📦 Running pod install..."
-                cd "${PROJECT_PATH}/Builds/iOS"
-
-                if [ ! -f "Podfile" ]; then
-                    echo "⚠️  No Podfile found. Skipping pod install."
-                    exit 0
-                fi
-
-                echo "📄 Podfile found. Running pod install..."
-                LANG=en_US.UTF-8 ${POD_PATH} install --repo-update
-
-                echo "✅ pod install completed."
-                '''
-            }
-        }
-
-        stage('Archive Xcode Project') {
-            when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
-            steps {
-                sh '''
-                echo "🔨 Archiving Xcode project..."
-
-                IOS_PATH="${PROJECT_PATH}/Builds/iOS"
-                WORKSPACE_PATH="$IOS_PATH/Unity-iPhone.xcworkspace"
-                PROJECT_PATH_XCODE="$IOS_PATH/Unity-iPhone.xcodeproj"
-                ARCHIVE_PATH="$IOS_PATH/build.xcarchive"
-
-                if [ -d "$WORKSPACE_PATH" ]; then
-                    echo "📁 Found xcworkspace. Using workspace build..."
-                    xcodebuild -workspace "$WORKSPACE_PATH" -scheme Unity-iPhone -configuration Release -sdk iphoneos -archivePath "$ARCHIVE_PATH" archive
-                elif [ -d "$PROJECT_PATH_XCODE" ]; then
-                    echo "📁 No xcworkspace found. Falling back to xcodeproj..."
-                    xcodebuild -project "$PROJECT_PATH_XCODE" -scheme Unity-iPhone -configuration Release -sdk iphoneos -archivePath "$ARCHIVE_PATH" archive
-                else
-                    echo "❌ ERROR: Neither .xcworkspace nor .xcodeproj found!"
-                    exit 1
-                fi
-                '''
-            }
-        }
-
-        stage('Export IPA Adhoc') {
-            when {
-                expression { ((params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS') && (params.BUILD_IOS_FORMAT == 'AdHoc' || params.BUILD_IOS_FORMAT == 'Both')) }
-            }
-            steps {
-                sh '''
-                echo "🔨 Exporting IPA (Adhoc)..."
-                xcodebuild -exportArchive -archivePath "${PROJECT_PATH}/Builds/iOS/build.xcarchive" -exportOptionsPlist ExportOptions_Adhoc.plist -exportPath "${PROJECT_PATH}/Builds/iOS/ipa"
-                '''
-            }
-        }
-
-        stage('Rename IPA Adhoc') {
-            when {
-                expression { ((params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS') && (params.BUILD_IOS_FORMAT == 'AdHoc' || params.BUILD_IOS_FORMAT == 'Both')) }
-            }
-            steps {
-                script {
-                    def rawAppName = sh(script: "/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' \"${PROJECT_PATH}/Builds/iOS/Info.plist\"", returnStdout: true).trim()
-                    def appName = rawAppName.replaceAll('[^a-zA-Z0-9_-]', '')
-                    def version = sh(script: "/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \"${PROJECT_PATH}/Builds/iOS/Info.plist\"", returnStdout: true).trim()
-                    def datetime = sh(script: "TZ='Asia/Bangkok' date '+%d-%m-%Y-%H-%M-%S'", returnStdout: true).trim()
-                    
-                    def prefix = ""
-                    if (params.DEVELOPMENT_BUILD) {
-                        prefix = "DEV_BUILD_"
-                    }
-                    
-                    if (params.SCRIPTING_DEFINE_SYMBOLS && params.SCRIPTING_DEFINE_SYMBOLS.trim()) {
-                        def symbolsPrefix = params.SCRIPTING_DEFINE_SYMBOLS
-                            .replaceAll(/[,;]/, '_')
-                            .replaceAll(/[^a-zA-Z0-9_]/, '_')
-                            .replaceAll(/_{2,}/, '_')
-                            .replaceAll(/^_|_$/, '')
-                        if (symbolsPrefix) {
-                            prefix = "${symbolsPrefix}_${prefix}"
-                        }
-                    }
-                    
-                    def ipaName = "${prefix}${appName}_${version}_${datetime}_GMT+7_AdHoc.ipa"
-                    echo "📦 Renaming ipa to: ${ipaName}"
-                    sh """mv "${PROJECT_PATH}/Builds/iOS/ipa/${appName}.ipa" "${PROJECT_PATH}/Builds/iOS/ipa/${ipaName}" """
-                }
-            }
-        }
-
-        stage('Export IPA AppStore') {
-            when {
-                expression { ((params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS') && (params.BUILD_IOS_FORMAT == 'AppStore' || params.BUILD_IOS_FORMAT == 'Both')) }
-            }
-            steps {
-                sh '''
-                echo "🔨 Exporting IPA (AppStore)..."
-                xcodebuild -exportArchive -archivePath "${PROJECT_PATH}/Builds/iOS/build.xcarchive" -exportOptionsPlist ExportOptions_Prod.plist -exportPath "${PROJECT_PATH}/Builds/iOS/ipa"
-                '''
-            }
-        }
-
-        stage('Rename IPA AppStore') {
-            when {
-                expression { ((params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS') && (params.BUILD_IOS_FORMAT == 'AppStore' || params.BUILD_IOS_FORMAT == 'Both')) }
-            }
-            steps {
-                script {
-                    def rawAppName = sh(script: "/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' \"${PROJECT_PATH}/Builds/iOS/Info.plist\"", returnStdout: true).trim()
-                    def appName = rawAppName.replaceAll('[^a-zA-Z0-9_-]', '')
-                    def version = sh(script: "/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \"${PROJECT_PATH}/Builds/iOS/Info.plist\"", returnStdout: true).trim()
-                    def datetime = sh(script: "TZ='Asia/Bangkok' date '+%d-%m-%Y-%H-%M-%S'", returnStdout: true).trim()
-                    
-                    def prefix = ""
-                    if (params.DEVELOPMENT_BUILD) {
-                        prefix = "DEV_BUILD_"
-                    }
-                    
-                    if (params.SCRIPTING_DEFINE_SYMBOLS && params.SCRIPTING_DEFINE_SYMBOLS.trim()) {
-                        def symbolsPrefix = params.SCRIPTING_DEFINE_SYMBOLS
-                            .replaceAll(/[,;]/, '_')
-                            .replaceAll(/[^a-zA-Z0-9_]/, '_')
-                            .replaceAll(/_{2,}/, '_')
-                            .replaceAll(/^_|_$/, '')
-                        if (symbolsPrefix) {
-                            prefix = "${symbolsPrefix}_${prefix}"
-                        }
-                    }
-                    
-                    def ipaName = "${prefix}${appName}_${version}_${datetime}_GMT+7_AppStore.ipa"
-                    echo "📦 Renaming ipa to: ${ipaName}"
-                    sh """mv "${PROJECT_PATH}/Builds/iOS/ipa/${appName}.ipa" "${PROJECT_PATH}/Builds/iOS/ipa/${ipaName}" """
-                }
-            }
-        }
-
-        stage('Archive iOS IPA') {
-            when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
-            steps {
-                script {
-                    def relativePath = PROJECT_PATH == env.WORKSPACE ? '' : PROJECT_PATH - "${env.WORKSPACE}/"
-                    def path = relativePath ? "${relativePath}/Builds/iOS/ipa/*.ipa" : "Builds/iOS/ipa/*.ipa"
-                    archiveArtifacts artifacts: path, fingerprint: true
-                }
-            }
-        }
-
-        stage('Cleanup IPA Folders') {
-            when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
-            steps {
-                sh '''
-                echo "🧹 Cleaning up IPA files in ${PROJECT_PATH}/Builds/iOS/ipa/"
-                rm -f "${PROJECT_PATH}/Builds/iOS/ipa/"*.ipa
-                echo "✅ IPA files cleaned up."
-                '''
-            }
-        }
-
-        stage('Archive dSYMs if AppStore') {
-            when {
-                expression {
-                    return (params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS') &&
-                           (params.BUILD_IOS_FORMAT == 'AppStore' || params.BUILD_IOS_FORMAT == 'Both')
-                }
-            }
-            steps {
-                sh '''
-                echo "📦 Zipping dSYMs from build.xcarchive..."
-                ARCHIVE_PATH="${PROJECT_PATH}/Builds/iOS/build.xcarchive"
-                if [ -d "$ARCHIVE_PATH/dSYMs" ]; then
-                  cd "$ARCHIVE_PATH"
-                  zip -r dSYMs.zip dSYMs
-                  cp dSYMs.zip "${PROJECT_PATH}/Builds/iOS/dSYMs.zip"
-                else
-                  echo "❌ No dSYMs folder found in $ARCHIVE_PATH"
-                  exit 1
-                fi
-                '''
-                archiveArtifacts artifacts: 'Builds/iOS/dSYMs.zip', fingerprint: true
-            }
-        }
-
-        stage('Cleanup dSYMs.zip') {
-            when {
-                expression {
-                    return (params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS') &&
-                           (params.BUILD_IOS_FORMAT == 'AppStore' || params.BUILD_IOS_FORMAT == 'Both')
-                }
-            }
-            steps {
-                sh '''
-                echo "🧹 Cleaning up dSYMs.zip file..."
-                rm -f "${PROJECT_PATH}/Builds/iOS/dSYMs.zip"
-                echo "✅ dSYMs.zip cleaned up."
-                '''
-            }
-        }
-
-        stage('Build MacOS') {
-            when { expression { params.BUILD_TARGET == 'MacOS' || params.BUILD_TARGET == 'Both MacOS Windows' } }
-            environment {
-                DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}"
-                SCRIPTING_DEFINE_SYMBOLS = "${params.SCRIPTING_DEFINE_SYMBOLS}"
-            }
-            steps {
-                sh '''
-                echo "🔨 Starting Unity MacOS build..."
-                echo "⚙️ DEVELOPMENT_BUILD=${DEVELOPMENT_BUILD}"
-                ${UNITY_PATH} -quit -batchmode -nographics -projectPath "${PROJECT_PATH}" -logfile 'unity_build_log_macos.txt' -executeMethod ${BUILD_METHOD_MACOS} -buildTarget osxuniversal
-                '''
-            }
-        }
-
-        stage('Archive Unity MacOS Build Log') {
-            when { expression { params.BUILD_TARGET == 'MacOS' || params.BUILD_TARGET == 'Both MacOS Windows' } }
-            steps {
-                script {
-                    def logPath = "unity_build_log_macos.txt"
-                    archiveArtifacts artifacts: logPath, fingerprint: true, allowEmptyArchive: true
-                }
-            }
-        }
-
-        stage('Zip MacOS Build') {
-            when { expression { params.BUILD_TARGET == 'MacOS' || params.BUILD_TARGET == 'Both MacOS Windows' } }
-            environment {
-                DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}"
-                SCRIPTING_DEFINE_SYMBOLS = "${params.SCRIPTING_DEFINE_SYMBOLS}"
-            }
-            steps {
-                sh '''
-                echo "📦 Zipping MacOS build..."
-                cd "${PROJECT_PATH}/Builds"
-                
-                PREFIX=""
-                if [ "${DEVELOPMENT_BUILD}" = "true" ]; then
-                  PREFIX="DEV_BUILD_"
-                fi
-                
-                if [ -n "${SCRIPTING_DEFINE_SYMBOLS}" ]; then
-                  # Sanitize SCRIPTING_DEFINE_SYMBOLS: replace commas/semicolons with underscore, remove special chars
-                  SYMBOLS_PREFIX=$(echo "${SCRIPTING_DEFINE_SYMBOLS}" | sed 's/[,;]/_/g' | sed 's/[^a-zA-Z0-9_]/_/g' | sed 's/__*/_/g' | sed 's/^_//' | sed 's/_$//')
-                  if [ -n "$SYMBOLS_PREFIX" ]; then
-                    PREFIX="${SYMBOLS_PREFIX}_${PREFIX}"
-                  fi
-                fi
-                
-                ZIPNAME="${PREFIX}MacOSBuild.zip"
-                zip -r "${ZIPNAME}" MacOS
-                echo "✅ MacOS build zipped as ${ZIPNAME}."
-                '''
-            }
-        }
-
-        stage('Build Windows') {
-            when { expression { params.BUILD_TARGET == 'Windows' || params.BUILD_TARGET == 'Both MacOS Windows' } }
-            environment {
-                DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}"
-                SCRIPTING_DEFINE_SYMBOLS = "${params.SCRIPTING_DEFINE_SYMBOLS}"
-            }
-            steps {
-                sh '''
-                echo "🔨 Starting Unity Windows build..."
-                echo "⚙️ DEVELOPMENT_BUILD=${DEVELOPMENT_BUILD}"
-                ${UNITY_PATH} -quit -batchmode -nographics -projectPath "${PROJECT_PATH}" -logfile 'unity_build_log_windows.txt' -executeMethod ${BUILD_METHOD_WINDOWS} -buildTarget win64
-                '''
-            }
-        }
-
-        stage('Archive Unity Windows Build Log') {
-            when { expression { params.BUILD_TARGET == 'Windows' || params.BUILD_TARGET == 'Both MacOS Windows' } }
-            steps {
-                script {
-                    def logPath = "unity_build_log_windows.txt"
-                    archiveArtifacts artifacts: logPath, fingerprint: true, allowEmptyArchive: true
-                }
-            }
-        }
-
-        stage('Zip Windows Build') {
-            when { expression { params.BUILD_TARGET == 'Windows' || params.BUILD_TARGET == 'Both MacOS Windows' } }
-            environment {
-                DEVELOPMENT_BUILD = "${params.DEVELOPMENT_BUILD}"
-                SCRIPTING_DEFINE_SYMBOLS = "${params.SCRIPTING_DEFINE_SYMBOLS}"
-            }
-            steps {
-                sh '''
-                echo "📦 Zipping Windows build..."
-                cd "${PROJECT_PATH}/Builds"
-                
-                PREFIX=""
-                if [ "${DEVELOPMENT_BUILD}" = "true" ]; then
-                  PREFIX="DEV_BUILD_"
-                fi
-                
-                if [ -n "${SCRIPTING_DEFINE_SYMBOLS}" ]; then
-                  # Sanitize SCRIPTING_DEFINE_SYMBOLS: replace commas/semicolons with underscore, remove special chars
-                  SYMBOLS_PREFIX=$(echo "${SCRIPTING_DEFINE_SYMBOLS}" | sed 's/[,;]/_/g' | sed 's/[^a-zA-Z0-9_]/_/g' | sed 's/__*/_/g' | sed 's/^_//' | sed 's/_$//')
-                  if [ -n "$SYMBOLS_PREFIX" ]; then
-                    PREFIX="${SYMBOLS_PREFIX}_${PREFIX}"
-                  fi
-                fi
-                
-                ZIPNAME="${PREFIX}WindowsBuild.zip"
-                zip -r "${ZIPNAME}" Windows
-                echo "✅ Windows build zipped as ${ZIPNAME}."
-                '''
-            }
-        }
-
-        stage('Archive MacOS and Window ZIP') {
-            when { expression { params.BUILD_TARGET == 'MacOS' || params.BUILD_TARGET == 'Windows' || params.BUILD_TARGET == 'Both MacOS Windows' } }
-            steps {
-                script {
-                    def relativePath = PROJECT_PATH == env.WORKSPACE ? '' : PROJECT_PATH - "${env.WORKSPACE}/"
-                    def path = relativePath ? "${relativePath}/Builds/*.zip" : "Builds/*.zip"
-                    archiveArtifacts artifacts: path, fingerprint: true
-                }
-            }
-        }
-
-        stage('Cleanup ZIP files') {
-            when { expression { params.BUILD_TARGET == 'MacOS' || params.BUILD_TARGET == 'Windows' || params.BUILD_TARGET == 'Both MacOS Windows' } }
-            steps {
-                sh '''
-                echo "🧹 Cleaning up Zip files in ${PROJECT_PATH}/Builds/"
-                rm -f "${PROJECT_PATH}/Builds/"*.zip
-                echo "✅ ZIP files cleaned up."
-                '''
             }
         }
     }
