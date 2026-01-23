@@ -169,7 +169,7 @@ pipeline {
                     def serviceAccountKeyId = env.GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY_ID ?: 'google-drive-service-account-key'
                     echo "ℹ️ Using Service Account credentials ID: ${serviceAccountKeyId}"
                     
-                    // Tạo Python script để upload lên Google Drive sử dụng Service Account
+                    // Tạo Python script để upload lên Google Drive sử dụng Service Account với Shared Drives
                     def uploadScript = '''
 import os
 import sys
@@ -189,6 +189,7 @@ except ImportError:
 SCOPES = ['https://www.googleapis.com/auth/drive']
 FOLDER_PATH = ["Works", "Projects", "Coffee Mania", "Build"]
 SERVICE_ACCOUNT_KEY_FILE = 'service_account_key.json'
+SHARED_DRIVE_NAME = os.environ.get('GOOGLE_DRIVE_SHARED_DRIVE_NAME', 'Zenga')
 
 def get_service_account_credentials():
     """Lấy Service Account credentials từ environment variable hoặc file"""
@@ -227,11 +228,45 @@ def authenticate():
     
     return build('drive', 'v3', credentials=creds)
 
+def find_or_create_shared_drive(service, drive_name):
+    """Tìm Shared Drive và trả về root folder ID"""
+    try:
+        # List tất cả Shared Drives
+        results = service.drives().list(pageSize=100).execute()
+        drives = results.get('drives', [])
+        
+        # Tìm Shared Drive với tên phù hợp
+        for drive in drives:
+            if drive.get('name') == drive_name:
+                drive_id = drive.get('id')
+                print(f"✅ Found Shared Drive: {drive_name} (ID: {drive_id})")
+                
+                # Root folder của Shared Drive có ID giống với drive_id
+                return drive_id
+        
+        # Nếu không tìm thấy
+        print(f"⚠️ Shared Drive '{drive_name}' not found.")
+        print("   Please create the Shared Drive manually in Google Drive and add the Service Account as Content Manager.")
+        raise Exception(f"Shared Drive '{drive_name}' not found. Please create it manually and add Service Account as Content Manager.")
+        
+    except Exception as e:
+        if 'not found' in str(e).lower() or 'Shared Drive' in str(e):
+            raise
+        print(f"⚠️ Error finding Shared Drive: {str(e)}")
+        raise Exception(f"Could not access Shared Drives. Make sure Service Account has access to Shared Drive '{drive_name}'")
+
 def find_or_create_folder(service, parent_id, folder_name):
-    """Tìm hoặc tạo thư mục trong Google Drive"""
+    """Tìm hoặc tạo thư mục trong Shared Drive"""
     # Tìm thư mục
     query = f"'{parent_id}' in parents and name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
-    results = service.files().list(q=query, fields="files(id, name)").execute()
+    
+    results = service.files().list(
+        q=query,
+        fields="files(id, name)",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+        corpora='allDrives'
+    ).execute()
     items = results.get('files', [])
     
     if items:
@@ -243,11 +278,16 @@ def find_or_create_folder(service, parent_id, folder_name):
             'mimeType': 'application/vnd.google-apps.folder',
             'parents': [parent_id]
         }
-        folder = service.files().create(body=file_metadata, fields='id').execute()
+        
+        folder = service.files().create(
+            body=file_metadata,
+            fields='id',
+            supportsAllDrives=True
+        ).execute()
         return folder.get('id')
 
 def upload_file(service, file_path, folder_id):
-    """Upload file lên Google Drive"""
+    """Upload file lên Shared Drive"""
     file_name = os.path.basename(file_path)
     print(f"📤 Uploading {file_name}...")
     
@@ -260,7 +300,8 @@ def upload_file(service, file_path, folder_id):
     file = service.files().create(
         body=file_metadata,
         media_body=media,
-        fields='id, webViewLink'
+        fields='id, webViewLink',
+        supportsAllDrives=True
     ).execute()
     
     print(f"✅ Successfully uploaded {file_name}")
@@ -278,8 +319,11 @@ if __name__ == "__main__":
     try:
         service = authenticate()
         
-        # Bắt đầu từ root (My Drive)
-        current_folder_id = "root"
+        # Tìm hoặc tạo Shared Drive và lấy root folder
+        shared_drive_root_id = find_or_create_shared_drive(service, SHARED_DRIVE_NAME)
+        
+        # Bắt đầu từ Shared Drive root folder
+        current_folder_id = shared_drive_root_id
         
         # Tạo/tìm từng thư mục trong đường dẫn
         for folder_name in FOLDER_PATH:
@@ -293,7 +337,7 @@ if __name__ == "__main__":
             else:
                 print(f"⚠️ File not found: {apk_file}")
         
-        print("✅ All files uploaded successfully to Google Drive!")
+        print("✅ All files uploaded successfully to Google Drive Shared Drive!")
         
     except Exception as e:
         print(f"❌ Error uploading to Google Drive: {str(e)}")
