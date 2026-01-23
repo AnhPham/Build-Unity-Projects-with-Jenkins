@@ -147,6 +147,17 @@ pipeline {
             }
         }
 
+        stage('Cleanup APK AAB Folders') {
+            when { expression { params.BUILD_TARGET == 'Android' || params.BUILD_TARGET == 'Both Android iOS' } }
+            steps {
+                sh '''
+                echo "🧹 Cleaning up APK AAB files in ${PROJECT_PATH}/Builds/Android/"
+                rm -f "${PROJECT_PATH}/Builds/Android/"*.apk "${PROJECT_PATH}/Builds/Android/"*.aab
+                echo "✅ APK AAB files cleaned up."
+                '''
+            }
+        }
+
         stage('Build iOS') {
             when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
             environment {
@@ -321,6 +332,17 @@ pipeline {
             }
         }
 
+        stage('Cleanup IPA Folders') {
+            when { expression { params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS' } }
+            steps {
+                sh '''
+                echo "🧹 Cleaning up IPA files in ${PROJECT_PATH}/Builds/iOS/ipa/"
+                rm -f "${PROJECT_PATH}/Builds/iOS/ipa/"*.ipa
+                echo "✅ IPA files cleaned up."
+                '''
+            }
+        }
+
         stage('Archive dSYMs if AppStore') {
             when {
                 expression {
@@ -342,6 +364,22 @@ pipeline {
                 fi
                 '''
                 archiveArtifacts artifacts: 'Builds/iOS/dSYMs.zip', fingerprint: true
+            }
+        }
+
+        stage('Cleanup dSYMs.zip') {
+            when {
+                expression {
+                    return (params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS') &&
+                           (params.BUILD_IOS_FORMAT == 'AppStore' || params.BUILD_IOS_FORMAT == 'Both')
+                }
+            }
+            steps {
+                sh '''
+                echo "🧹 Cleaning up dSYMs.zip file..."
+                rm -f "${PROJECT_PATH}/Builds/iOS/dSYMs.zip"
+                echo "✅ dSYMs.zip cleaned up."
+                '''
             }
         }
 
@@ -468,6 +506,17 @@ pipeline {
             }
         }
 
+        stage('Cleanup ZIP files') {
+            when { expression { params.BUILD_TARGET == 'MacOS' || params.BUILD_TARGET == 'Windows' || params.BUILD_TARGET == 'Both MacOS Windows' } }
+            steps {
+                sh '''
+                echo "🧹 Cleaning up Zip files in ${PROJECT_PATH}/Builds/"
+                rm -f "${PROJECT_PATH}/Builds/"*.zip
+                echo "✅ ZIP files cleaned up."
+                '''
+            }
+        }
+        
         stage('Upload Build Artifacts to Google Drive') {
             when {
                 expression {
@@ -489,71 +538,95 @@ pipeline {
                     
                     echo "📦 Build folder name: ${folderName}"
                     
-                    // Tìm tất cả các file đã archive
-                    def allFiles = []
+                    // Xây dựng đường dẫn archive của Jenkins
+                    // Jenkins lưu archive tại: ${JENKINS_HOME}/jobs/${JOB_NAME}/builds/${BUILD_NUMBER}/archive/
+                    def archivePath = null
                     
-                    // Android files
-                    if (params.BUILD_TARGET == 'Android' || params.BUILD_TARGET == 'Both Android iOS') {
-                        def androidFiles = sh(
-                            script: "find '${PROJECT_PATH}/Builds/Android' -type f \\( -name '*.apk' -o -name '*.aab' \\) 2>/dev/null || true",
-                            returnStdout: true
-                        ).trim().split('\n').findAll { it }
-                        allFiles.addAll(androidFiles)
-                        
-                        // Android build logs
-                        def androidLog = sh(
-                            script: "test -f '${env.WORKSPACE}/unity_build_log_android.txt' && echo '${env.WORKSPACE}/unity_build_log_android.txt' || true",
+                    // Thử các đường dẫn có thể có
+                    def possiblePaths = []
+                    
+                    // Cách 1: Sử dụng JENKINS_HOME nếu có
+                    if (env.JENKINS_HOME) {
+                        possiblePaths.add("${env.JENKINS_HOME}/jobs/${env.JOB_NAME}/builds/${env.BUILD_NUMBER}/archive")
+                    }
+                    
+                    // Cách 2: Tìm từ workspace path
+                    // Workspace thường là: ${JENKINS_HOME}/workspace/${JOB_NAME}@script hoặc ${JENKINS_HOME}/jobs/${JOB_NAME}/workspace
+                    def workspaceDir = env.WORKSPACE ?: ''
+                    if (workspaceDir) {
+                        // Từ workspace, đi lên để tìm JENKINS_HOME
+                        // Ví dụ: /var/jenkins_home/workspace/MyJob@script -> /var/jenkins_home
+                        def workspaceParent = sh(
+                            script: "dirname '${workspaceDir}' 2>/dev/null || echo ''",
                             returnStdout: true
                         ).trim()
-                        if (androidLog) {
-                            allFiles.add(androidLog)
+                        
+                        if (workspaceParent) {
+                            // Loại bỏ @script hoặc các suffix khác
+                            def cleanParent = workspaceParent.replaceAll('@.*$', '')
+                            
+                            // Nếu workspace nằm trong /workspace/, JENKINS_HOME là parent
+                            if (cleanParent.contains('/workspace')) {
+                                def jenkinsHome = cleanParent.replaceAll('/workspace.*', '')
+                                possiblePaths.add("${jenkinsHome}/jobs/${env.JOB_NAME}/builds/${env.BUILD_NUMBER}/archive")
+                            }
+                            // Nếu workspace nằm trong /jobs/, JENKINS_HOME là parent của jobs
+                            else if (cleanParent.contains('/jobs/')) {
+                                def jenkinsHome = cleanParent.replaceAll('/jobs/.*', '')
+                                possiblePaths.add("${jenkinsHome}/jobs/${env.JOB_NAME}/builds/${env.BUILD_NUMBER}/archive")
+                            }
                         }
                     }
                     
-                    // iOS files
-                    if (params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS') {
-                        def iosFiles = sh(
-                            script: "find '${PROJECT_PATH}/Builds/iOS' -type f \\( -name '*.ipa' -o -name '*.zip' \\) 2>/dev/null || true",
+                    // Cách 3: Tìm bằng cách tìm kiếm từ root (nếu có quyền)
+                    possiblePaths.add("/var/jenkins_home/jobs/${env.JOB_NAME}/builds/${env.BUILD_NUMBER}/archive")
+                    possiblePaths.add("/Users/Shared/Jenkins/Home/jobs/${env.JOB_NAME}/builds/${env.BUILD_NUMBER}/archive")
+                    
+                    // Loại bỏ duplicate paths
+                    possiblePaths = possiblePaths.findAll { it }.unique()
+                    
+                    echo "🔍 Searching for archive directory..."
+                    possiblePaths.each { path ->
+                        echo "   Trying: ${path}"
+                    }
+                    
+                    // Tìm archive directory
+                    for (def path : possiblePaths) {
+                        def exists = sh(
+                            script: "test -d '${path}' && echo 'yes' || echo 'no'",
                             returnStdout: true
-                        ).trim().split('\n').findAll { it }
-                        allFiles.addAll(iosFiles)
-                        
-                        // iOS build logs
-                        def iosLog = sh(
-                            script: "test -f '${env.WORKSPACE}/unity_build_log_ios.txt' && echo '${env.WORKSPACE}/unity_build_log_ios.txt' || true",
-                            returnStdout: true
-                        ).trim()
-                        if (iosLog) {
-                            allFiles.add(iosLog)
+                        ).trim() == 'yes'
+                        if (exists) {
+                            archivePath = path
+                            break
                         }
                     }
                     
-                    // MacOS/Windows files
-                    if (params.BUILD_TARGET == 'MacOS' || params.BUILD_TARGET == 'Windows' || params.BUILD_TARGET == 'Both MacOS Windows') {
-                        def desktopFiles = sh(
-                            script: "find '${PROJECT_PATH}/Builds' -maxdepth 1 -type f -name '*.zip' 2>/dev/null || true",
-                            returnStdout: true
-                        ).trim().split('\n').findAll { it }
-                        allFiles.addAll(desktopFiles)
-                        
-                        // MacOS build logs
-                        def macosLog = sh(
-                            script: "test -f '${env.WORKSPACE}/unity_build_log_macos.txt' && echo '${env.WORKSPACE}/unity_build_log_macos.txt' || true",
-                            returnStdout: true
-                        ).trim()
-                        if (macosLog) {
-                            allFiles.add(macosLog)
-                        }
-                        
-                        // Windows build logs
-                        def windowsLog = sh(
-                            script: "test -f '${env.WORKSPACE}/unity_build_log_windows.txt' && echo '${env.WORKSPACE}/unity_build_log_windows.txt' || true",
-                            returnStdout: true
-                        ).trim()
-                        if (windowsLog) {
-                            allFiles.add(windowsLog)
-                        }
+                    if (!archivePath) {
+                        error("""
+⚠️ Archive directory not found!
+
+Tried paths:
+${possiblePaths.collect { "   - ${it}" }.join('\n')}
+
+Please check:
+1. Jenkins archive directory configuration
+2. JENKINS_HOME environment variable
+3. Job name: ${env.JOB_NAME}
+4. Build number: ${env.BUILD_NUMBER}
+
+Note: Archive directory should be at:
+   ${env.JENKINS_HOME ?: 'JENKINS_HOME'}/jobs/${env.JOB_NAME}/builds/${env.BUILD_NUMBER}/archive
+                        """)
                     }
+                    
+                    echo "✅ Found archive directory: ${archivePath}"
+                    
+                    // Tìm tất cả các file trong archive directory
+                    def allFiles = sh(
+                        script: "find '${archivePath}' -type f 2>/dev/null || true",
+                        returnStdout: true
+                    ).trim().split('\n').findAll { it }
                     
                     // Loại bỏ file trùng lặp và file không tồn tại
                     allFiles = allFiles.findAll { file -> 
@@ -562,13 +635,14 @@ pipeline {
                     }.unique()
                     
                     if (allFiles.isEmpty()) {
-                        echo "⚠️ No files found to upload"
+                        echo "⚠️ No files found in archive directory"
                         return
                     }
                     
-                    echo "Found ${allFiles.size()} file(s) to upload:"
+                    echo "Found ${allFiles.size()} file(s) in archive to upload:"
                     allFiles.each { file ->
-                        echo "   - ${file}"
+                        def relativePath = file.replace(archivePath + '/', '')
+                        echo "   - ${relativePath}"
                     }
                     
                     // Credentials ID có thể được cấu hình qua environment variable
