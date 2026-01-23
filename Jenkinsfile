@@ -139,30 +139,108 @@ pipeline {
             }
         }
 
-        stage('Upload APK to Google Drive') {
+        stage('Upload Build Artifacts to Google Drive') {
             when {
                 expression {
-                    return (params.BUILD_TARGET == 'Android' || params.BUILD_TARGET == 'Both Android iOS') && params.UPLOAD_TO_GOOGLE_DRIVE
+                    return params.UPLOAD_TO_GOOGLE_DRIVE
                 }
             }
             steps {
                 script {
-                    echo "📤 Uploading APK files to Google Drive..."
+                    echo "📤 Uploading build artifacts to Google Drive..."
                     echo "📧 Target account: ni@zenga.com.vn"
                     echo "📁 Target folder: Works/Projects/Coffee Mania/Build"
                     
-                    // Tìm tất cả các file APK trong thư mục Builds/Android
-                    def apkFiles = sh(
-                        script: "find '${PROJECT_PATH}/Builds/Android' -name '*.apk' -type f",
+                    // Lấy build number hoặc tạo tên từ datetime
+                    def buildNumber = env.BUILD_NUMBER ?: null
+                    def folderName = buildNumber ? "#${buildNumber}" : sh(
+                        script: "TZ='Asia/Bangkok' date '+%Y-%m-%d-%H-%M-%S'",
                         returnStdout: true
-                    ).trim().split('\n').findAll { it }
+                    ).trim()
                     
-                    if (apkFiles.isEmpty()) {
-                        echo "⚠️ No APK files found to upload"
+                    echo "📦 Build folder name: ${folderName}"
+                    
+                    // Tìm tất cả các file đã archive
+                    def allFiles = []
+                    
+                    // Android files
+                    if (params.BUILD_TARGET == 'Android' || params.BUILD_TARGET == 'Both Android iOS') {
+                        def androidFiles = sh(
+                            script: "find '${PROJECT_PATH}/Builds/Android' -type f \\( -name '*.apk' -o -name '*.aab' \\) 2>/dev/null || true",
+                            returnStdout: true
+                        ).trim().split('\n').findAll { it }
+                        allFiles.addAll(androidFiles)
+                        
+                        // Android build logs
+                        def androidLog = sh(
+                            script: "test -f '${env.WORKSPACE}/unity_build_log_android.txt' && echo '${env.WORKSPACE}/unity_build_log_android.txt' || true",
+                            returnStdout: true
+                        ).trim()
+                        if (androidLog) {
+                            allFiles.add(androidLog)
+                        }
+                    }
+                    
+                    // iOS files
+                    if (params.BUILD_TARGET == 'iOS' || params.BUILD_TARGET == 'Both Android iOS') {
+                        def iosFiles = sh(
+                            script: "find '${PROJECT_PATH}/Builds/iOS' -type f \\( -name '*.ipa' -o -name '*.zip' \\) 2>/dev/null || true",
+                            returnStdout: true
+                        ).trim().split('\n').findAll { it }
+                        allFiles.addAll(iosFiles)
+                        
+                        // iOS build logs
+                        def iosLog = sh(
+                            script: "test -f '${env.WORKSPACE}/unity_build_log_ios.txt' && echo '${env.WORKSPACE}/unity_build_log_ios.txt' || true",
+                            returnStdout: true
+                        ).trim()
+                        if (iosLog) {
+                            allFiles.add(iosLog)
+                        }
+                    }
+                    
+                    // MacOS/Windows files
+                    if (params.BUILD_TARGET == 'MacOS' || params.BUILD_TARGET == 'Windows' || params.BUILD_TARGET == 'Both MacOS Windows') {
+                        def desktopFiles = sh(
+                            script: "find '${PROJECT_PATH}/Builds' -maxdepth 1 -type f -name '*.zip' 2>/dev/null || true",
+                            returnStdout: true
+                        ).trim().split('\n').findAll { it }
+                        allFiles.addAll(desktopFiles)
+                        
+                        // MacOS build logs
+                        def macosLog = sh(
+                            script: "test -f '${env.WORKSPACE}/unity_build_log_macos.txt' && echo '${env.WORKSPACE}/unity_build_log_macos.txt' || true",
+                            returnStdout: true
+                        ).trim()
+                        if (macosLog) {
+                            allFiles.add(macosLog)
+                        }
+                        
+                        // Windows build logs
+                        def windowsLog = sh(
+                            script: "test -f '${env.WORKSPACE}/unity_build_log_windows.txt' && echo '${env.WORKSPACE}/unity_build_log_windows.txt' || true",
+                            returnStdout: true
+                        ).trim()
+                        if (windowsLog) {
+                            allFiles.add(windowsLog)
+                        }
+                    }
+                    
+                    // Loại bỏ file trùng lặp và file không tồn tại
+                    allFiles = allFiles.findAll { file -> 
+                        def filePath = file.trim()
+                        return filePath && new File(filePath).exists()
+                    }.unique()
+                    
+                    if (allFiles.isEmpty()) {
+                        echo "⚠️ No files found to upload"
                         return
                     }
                     
-                    echo "Found ${apkFiles.size()} APK file(s) to upload"
+                    echo "Found ${allFiles.size()} file(s) to upload:"
+                    allFiles.each { file ->
+                        echo "   - ${file}"
+                    }
                     
                     // Credentials ID có thể được cấu hình qua environment variable
                     // Mặc định: 'google-drive-service-account-key' cho Service Account
@@ -190,6 +268,7 @@ SCOPES = ['https://www.googleapis.com/auth/drive']
 FOLDER_PATH = ["Works", "Projects", "Coffee Mania", "Build"]
 SERVICE_ACCOUNT_KEY_FILE = 'service_account_key.json'
 SHARED_DRIVE_NAME = os.environ.get('GOOGLE_DRIVE_SHARED_DRIVE_NAME', 'Zenga')
+BUILD_FOLDER_NAME = os.environ.get('BUILD_FOLDER_NAME', '')
 
 def get_service_account_credentials():
     """Lấy Service Account credentials từ environment variable hoặc file"""
@@ -235,6 +314,11 @@ def find_or_create_shared_drive(service, drive_name):
         results = service.drives().list(pageSize=100).execute()
         drives = results.get('drives', [])
         
+        # Debug: In ra tất cả Shared Drives mà Service Account có quyền truy cập
+        print(f"📋 Available Shared Drives ({len(drives)} total):")
+        for drive in drives:
+            print(f"   - {drive.get('name')} (ID: {drive.get('id')})")
+        
         # Tìm Shared Drive với tên phù hợp
         for drive in drives:
             if drive.get('name') == drive_name:
@@ -245,9 +329,12 @@ def find_or_create_shared_drive(service, drive_name):
                 return drive_id
         
         # Nếu không tìm thấy
-        print(f"⚠️ Shared Drive '{drive_name}' not found.")
-        print("   Please create the Shared Drive manually in Google Drive and add the Service Account as Content Manager.")
-        raise Exception(f"Shared Drive '{drive_name}' not found. Please create it manually and add Service Account as Content Manager.")
+        print(f"⚠️ Shared Drive '{drive_name}' not found in accessible Shared Drives.")
+        print("   Please make sure:")
+        print("   1. Shared Drive name matches exactly: 'Zenga'")
+        print("   2. Service Account has been added to the Shared Drive")
+        print("   3. Service Account has at least 'Content Manager' permission")
+        raise Exception(f"Shared Drive '{drive_name}' not found. Please add Service Account to Shared Drive with Content Manager permission.")
         
     except Exception as e:
         if 'not found' in str(e).lower() or 'Shared Drive' in str(e):
@@ -309,11 +396,18 @@ def upload_file(service, file_path, folder_id):
     return file.get('webViewLink')
 
 if __name__ == "__main__":
-    # Lấy danh sách file APK từ arguments
-    apk_files = sys.argv[1:]
+    # Lấy danh sách file từ arguments
+    files_to_upload = sys.argv[1:]
     
-    if not apk_files:
-        print("❌ No APK files provided")
+    if not files_to_upload:
+        print("❌ No files provided")
+        sys.exit(1)
+    
+    # Lấy build folder name từ environment variable
+    build_folder_name = BUILD_FOLDER_NAME
+    
+    if not build_folder_name:
+        print("❌ BUILD_FOLDER_NAME not provided")
         sys.exit(1)
     
     try:
@@ -330,14 +424,21 @@ if __name__ == "__main__":
             current_folder_id = find_or_create_folder(service, current_folder_id, folder_name)
             print(f"📁 Found/Created folder: {folder_name}")
         
-        # Upload từng file APK
-        for apk_file in apk_files:
-            if os.path.exists(apk_file):
-                upload_file(service, apk_file, current_folder_id)
-            else:
-                print(f"⚠️ File not found: {apk_file}")
+        # Tạo thư mục với tên build number hoặc datetime
+        build_folder_id = find_or_create_folder(service, current_folder_id, build_folder_name)
+        print(f"📁 Created/Found build folder: {build_folder_name}")
         
-        print("✅ All files uploaded successfully to Google Drive Shared Drive!")
+        # Upload từng file
+        uploaded_count = 0
+        for file_path in files_to_upload:
+            if os.path.exists(file_path):
+                upload_file(service, file_path, build_folder_id)
+                uploaded_count += 1
+            else:
+                print(f"⚠️ File not found: {file_path}")
+        
+        print(f"✅ Successfully uploaded {uploaded_count} file(s) to Google Drive Shared Drive!")
+        print(f"   Location: Works/Projects/Coffee Mania/Build/{build_folder_name}")
         
     except Exception as e:
         print(f"❌ Error uploading to Google Drive: {str(e)}")
@@ -350,7 +451,7 @@ if __name__ == "__main__":
                     writeFile file: 'upload_to_gdrive.py', text: uploadScript
                     
                     // Chạy script Python để upload
-                    def apkFilesStr = apkFiles.collect { "'${it}'" }.join(' ')
+                    def filesStr = allFiles.collect { "'${it}'" }.join(' ')
                     
                     // Thử sử dụng Jenkins Credentials Store cho Service Account key
                     try {
@@ -360,7 +461,8 @@ if __name__ == "__main__":
                         ]) {
                             echo "✅ Using Jenkins Credentials Store for Service Account"
                             sh """
-                                python3 upload_to_gdrive.py ${apkFilesStr}
+                                export BUILD_FOLDER_NAME="${folderName}"
+                                python3 upload_to_gdrive.py ${filesStr}
                             """
                         }
                     } catch (Exception e) {
@@ -394,14 +496,15 @@ To create a Service Account:
 2. Create a new Service Account or use existing one
 3. Enable Google Drive API
 4. Create a JSON key and download it
-5. Share the target Google Drive folder with the Service Account email address
+5. Share the target Google Drive Shared Drive with the Service Account email address
 
 See GOOGLE_DRIVE_SETUP.md for detailed instructions.
                             """)
                         }
                         
                         sh """
-                            python3 upload_to_gdrive.py ${apkFilesStr}
+                            export BUILD_FOLDER_NAME="${folderName}"
+                            python3 upload_to_gdrive.py ${filesStr}
                         """
                     }
                 }
