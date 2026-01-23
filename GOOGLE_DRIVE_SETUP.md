@@ -4,14 +4,14 @@ Hướng dẫn này sẽ giúp bạn cấu hình Google Drive Service Account đ
 
 ## Mục tiêu
 
-- Upload APK tự động lên Google Drive của tài khoản `katori.norikarin@gmail.com`
-- Thư mục đích: `Projects/Coffee Mania/Build`
+- Upload APK tự động lên Google Drive của tài khoản `ni@zenga.com.vn`
+- Thư mục đích: `Works/Projects/Coffee Mania/Build`
 - Sử dụng Service Account để không cần xác thực thủ công
 
 ## Bước 1: Tạo Google Cloud Project
 
 1. Truy cập [Google Cloud Console](https://console.cloud.google.com/)
-2. Đăng nhập bằng tài khoản `katori.norikarin@gmail.com`
+2. Đăng nhập bằng tài khoản `ni@zenga.com.vn`
 3. Tạo một project mới hoặc chọn project có sẵn:
    - Click vào dropdown project ở đầu trang
    - Click "New Project"
@@ -54,9 +54,9 @@ Hướng dẫn này sẽ giúp bạn cấu hình Google Drive Service Account đ
 ## Bước 5: Chia sẻ thư mục Google Drive với Service Account
 
 1. Mở file JSON vừa tải về, tìm trường `client_email` (ví dụ: `coffeemania-build-uploader@project-id.iam.gserviceaccount.com`)
-2. Đăng nhập vào [Google Drive](https://drive.google.com) bằng tài khoản `katori.norikarin@gmail.com`
-3. Tạo hoặc tìm thư mục `Projects/Coffee Mania/Build`:
-   - Nếu chưa có, tạo thư mục `Projects` > `Coffee Mania` > `Build`
+2. Đăng nhập vào [Google Drive](https://drive.google.com) bằng tài khoản `ni@zenga.com.vn`
+3. Tạo hoặc tìm thư mục `Works/Projects/Coffee Mania/Build`:
+   - Nếu chưa có, tạo thư mục `Works` > `Projects` > `Coffee Mania` > `Build`
 4. Right-click vào thư mục `Build` (hoặc thư mục cuối cùng trong đường dẫn)
 5. Click **Share** (Chia sẻ)
 6. Trong ô "Add people and groups", nhập email của service account (từ bước 1)

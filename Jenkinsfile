@@ -21,7 +21,7 @@ pipeline {
         choice(name: 'BUILD_IOS_FORMAT', choices: ['AdHoc', 'AppStore', 'Both'], description: 'Build AdHoc, AppStore or both')
         booleanParam(name: 'DEVELOPMENT_BUILD', defaultValue: false, description: 'Toggle Development Build, Autoconnect Profiler.')
         string(name: 'SCRIPTING_DEFINE_SYMBOLS', defaultValue: '', description: 'Scripting defines symbols separated by commas')
-        booleanParam(name: 'UPLOAD_TO_GOOGLE_DRIVE', defaultValue: false, description: 'Upload APK to Google Drive (katori.norikarin@gmail.com)')
+        booleanParam(name: 'UPLOAD_TO_GOOGLE_DRIVE', defaultValue: false, description: 'Upload APK to Google Drive (ni@zenga.com.vn)')
     }
 
     options { timestamps() }
@@ -148,8 +148,8 @@ pipeline {
             steps {
                 script {
                     echo "📤 Uploading APK files to Google Drive..."
-                    echo "📧 Target account: katori.norikarin@gmail.com"
-                    echo "📁 Target folder: Projects/Coffee Mania/Build"
+                    echo "📧 Target account: ni@zenga.com.vn"
+                    echo "📁 Target folder: Works/Projects/Coffee Mania/Build"
                     
                     // Tìm tất cả các file APK trong thư mục Builds/Android
                     def apkFiles = sh(
@@ -165,156 +165,65 @@ pipeline {
                     echo "Found ${apkFiles.size()} APK file(s) to upload"
                     
                     // Credentials ID có thể được cấu hình qua environment variable
-                    // Mặc định: 'google-drive-oauth-credentials' cho OAuth 2.0
-                    def oauthCredentialsId = env.GOOGLE_DRIVE_OAUTH_CREDENTIALS_ID ?: 'google-drive-oauth-credentials'
-                    def oauthTokenId = env.GOOGLE_DRIVE_OAUTH_TOKEN_ID ?: 'google-drive-oauth-token'
-                    echo "ℹ️ Using OAuth credentials ID: ${oauthCredentialsId}"
-                    echo "ℹ️ Using OAuth token ID: ${oauthTokenId}"
+                    // Mặc định: 'google-drive-service-account-key' cho Service Account
+                    def serviceAccountKeyId = env.GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY_ID ?: 'google-drive-service-account-key'
+                    echo "ℹ️ Using Service Account credentials ID: ${serviceAccountKeyId}"
                     
-                    // Tạo Python script để upload lên Google Drive sử dụng OAuth 2.0
+                    // Tạo Python script để upload lên Google Drive sử dụng Service Account
                     def uploadScript = '''
 import os
 import sys
 import json
-import pickle
-import base64
-from datetime import datetime, timedelta
 
 try:
-    from google_auth_oauthlib.flow import InstalledAppFlow
-    from google.auth.transport.requests import Request
+    from google.oauth2 import service_account
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
-    from google.oauth2.credentials import Credentials
 except ImportError:
     print("Installing required packages...")
-    os.system(f"{sys.executable} -m pip install --quiet google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client")
-    from google_auth_oauthlib.flow import InstalledAppFlow
-    from google.auth.transport.requests import Request
+    os.system(f"{sys.executable} -m pip install --quiet google-auth google-auth-httplib2 google-api-python-client")
+    from google.oauth2 import service_account
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
-    from google.oauth2.credentials import Credentials
 
 SCOPES = ['https://www.googleapis.com/auth/drive']
-FOLDER_PATH = ["Projects", "Coffee Mania", "Build"]
-CREDENTIALS_FILE = 'credentials_oauth.json'
-TOKEN_FILE = 'token.pickle'
+FOLDER_PATH = ["Works", "Projects", "Coffee Mania", "Build"]
+SERVICE_ACCOUNT_KEY_FILE = 'service_account_key.json'
 
-def get_oauth_credentials():
-    """Lấy OAuth credentials từ environment variable hoặc file"""
+def get_service_account_credentials():
+    """Lấy Service Account credentials từ environment variable hoặc file"""
     # Thử lấy từ environment variable (JSON string)
-    oauth_json = os.environ.get('GOOGLE_DRIVE_OAUTH_CREDENTIALS')
-    if oauth_json:
+    service_account_json = os.environ.get('GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY')
+    if service_account_json:
         try:
-            creds_data = json.loads(oauth_json)
+            creds_data = json.loads(service_account_json)
             # Lưu vào file tạm để sử dụng
-            with open(CREDENTIALS_FILE, 'w') as f:
+            with open(SERVICE_ACCOUNT_KEY_FILE, 'w') as f:
                 json.dump(creds_data, f)
-            return CREDENTIALS_FILE
+            print("✅ Loaded Service Account credentials from environment variable")
+            return SERVICE_ACCOUNT_KEY_FILE
         except Exception as e:
-            print(f"⚠️ Error parsing OAuth credentials from env: {str(e)}")
+            print(f"⚠️ Error parsing Service Account credentials from env: {str(e)}")
     
     # Thử lấy từ file
-    if os.path.exists(CREDENTIALS_FILE):
-        return CREDENTIALS_FILE
+    if os.path.exists(SERVICE_ACCOUNT_KEY_FILE):
+        print(f"✅ Loaded Service Account credentials from file: {SERVICE_ACCOUNT_KEY_FILE}")
+        return SERVICE_ACCOUNT_KEY_FILE
     
-    raise Exception("OAuth credentials not found. Please set GOOGLE_DRIVE_OAUTH_CREDENTIALS or provide credentials_oauth.json file")
-
-def get_saved_token():
-    """Lấy saved token từ environment variable hoặc file"""
-    # Thử lấy từ environment variable (base64 encoded pickle)
-    token_base64 = os.environ.get('GOOGLE_DRIVE_OAUTH_TOKEN')
-    if token_base64:
-        try:
-            token_data = base64.b64decode(token_base64)
-            return pickle.loads(token_data)
-        except Exception as e:
-            print(f"⚠️ Error parsing token from env: {str(e)}")
-    
-    # Thử lấy từ file
-    if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE, 'rb') as token:
-            return pickle.load(token)
-    
-    return None
-
-def save_token(creds):
-    """Lưu token vào environment variable hoặc file"""
-    # Lưu vào file
-    with open(TOKEN_FILE, 'wb') as token:
-        pickle.dump(creds, token)
-    
-    # Encode và in ra để có thể lưu vào Jenkins Credentials Store
-    token_base64 = base64.b64encode(pickle.dumps(creds)).decode('utf-8')
-    print("ℹ️ Token saved. To store in Jenkins Credentials Store, use this base64 string:")
-    print(f"   (First 50 chars): {token_base64[:50]}...")
-
-def check_token_expiry(creds):
-    """Kiểm tra và cảnh báo nếu token sắp hết hạn"""
-    if not creds or not creds.expiry:
-        return
-    
-    expiry_time = creds.expiry
-    now = datetime.utcnow()
-    time_until_expiry = expiry_time - now
-    
-    if time_until_expiry.total_seconds() < 0:
-        print("⚠️ Token has expired, will refresh automatically")
-    elif time_until_expiry.total_seconds() < 3600:  # Less than 1 hour
-        hours = time_until_expiry.total_seconds() / 3600
-        print(f"⚠️ Token expires in {hours:.1f} hours, will refresh automatically")
-    else:
-        days = time_until_expiry.total_seconds() / 86400
-        print(f"✅ Token valid for {days:.1f} days")
+    raise Exception("Service Account credentials not found. Please set GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY or provide service_account_key.json file")
 
 def authenticate():
-    """Authenticate với Google Drive sử dụng OAuth 2.0"""
-    creds = get_saved_token()
+    """Authenticate với Google Drive sử dụng Service Account"""
+    credentials_file = get_service_account_credentials()
     
-    # Nếu có token đã lưu, kiểm tra và refresh nếu cần
-    if creds:
-        check_token_expiry(creds)
-        
-        # Nếu token hết hạn nhưng có refresh token, tự động refresh
-        if creds.expired and creds.refresh_token:
-            print("🔄 Refreshing expired token...")
-            try:
-                creds.refresh(Request())
-                save_token(creds)
-                print("✅ Token refreshed successfully")
-            except Exception as e:
-                print(f"⚠️ Failed to refresh token: {str(e)}")
-                print("⚠️ Will need to re-authenticate")
-                creds = None
+    # Tạo credentials từ Service Account key file
+    creds = service_account.Credentials.from_service_account_file(
+        credentials_file,
+        scopes=SCOPES
+    )
     
-    # Nếu không có credentials hợp lệ, cần xác thực lại
-    if not creds or not creds.valid:
-        if creds and creds.expired and not creds.refresh_token:
-            raise Exception("Token expired and no refresh token available. Please re-authenticate.")
-        
-        # Lấy OAuth credentials
-        credentials_file = get_oauth_credentials()
-        
-        # Trong CI/CD (Jenkins), không thể mở browser, cần có token đã lưu
-        if os.getenv('JENKINS_URL') or os.getenv('CI'):
-            # Trong Jenkins/CI, cần token đã được lưu trước
-            raise Exception("""
-OAuth token not found or expired. Please authenticate manually first:
-
-1. Run this script locally with credentials_oauth.json
-2. Authenticate in browser
-3. Save the generated token.pickle to Jenkins Credentials Store
-4. Set GOOGLE_DRIVE_OAUTH_TOKEN environment variable with base64 encoded token
-
-See GOOGLE_DRIVE_OAUTH_SETUP.md for detailed instructions.
-            """)
-        
-        # Chạy OAuth flow (chỉ khi không phải CI/CD - chạy local)
-        print("🔐 Starting OAuth authentication flow...")
-        flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
-        creds = flow.run_local_server(port=0)
-        save_token(creds)
-        print("✅ Authentication successful!")
+    print("✅ Service Account authentication successful")
+    print(f"   Service Account Email: {creds.service_account_email}")
     
     return build('drive', 'v3', credentials=creds)
 
@@ -399,14 +308,13 @@ if __name__ == "__main__":
                     // Chạy script Python để upload
                     def apkFilesStr = apkFiles.collect { "'${it}'" }.join(' ')
                     
-                    // Thử sử dụng Jenkins Credentials Store cho OAuth credentials và token
+                    // Thử sử dụng Jenkins Credentials Store cho Service Account key
                     try {
-                        // Sử dụng Jenkins Credentials Store cho cả OAuth credentials và token
+                        // Sử dụng Jenkins Credentials Store cho Service Account key
                         withCredentials([
-                            string(credentialsId: oauthCredentialsId, variable: 'GOOGLE_DRIVE_OAUTH_CREDENTIALS'),
-                            string(credentialsId: oauthTokenId, variable: 'GOOGLE_DRIVE_OAUTH_TOKEN')
+                            string(credentialsId: serviceAccountKeyId, variable: 'GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY')
                         ]) {
-                            echo "✅ Using Jenkins Credentials Store for OAuth"
+                            echo "✅ Using Jenkins Credentials Store for Service Account"
                             sh """
                                 python3 upload_to_gdrive.py ${apkFilesStr}
                             """
@@ -415,39 +323,36 @@ if __name__ == "__main__":
                         echo "ℹ️ Jenkins credentials not available, trying environment variables or files..."
                         
                         // Kiểm tra credentials từ environment variables hoặc files
-                        def hasOAuthCredentials = sh(
-                            script: 'test -n "$GOOGLE_DRIVE_OAUTH_CREDENTIALS" || test -f "credentials_oauth.json"',
+                        def hasServiceAccountKey = sh(
+                            script: 'test -n "$GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY" || test -f "service_account_key.json"',
                             returnStatus: true
                         ) == 0
                         
-                        def hasOAuthToken = sh(
-                            script: 'test -n "$GOOGLE_DRIVE_OAUTH_TOKEN" || test -f "token.pickle"',
-                            returnStatus: true
-                        ) == 0
-                        
-                        if (!hasOAuthCredentials && !hasOAuthToken) {
+                        if (!hasServiceAccountKey) {
                             error("""
-⚠️ Google Drive OAuth credentials not found!
+⚠️ Google Drive Service Account credentials not found!
 
 Please configure one of the following:
 
 1. Jenkins Credentials Store (Recommended):
-   - Add OAuth credentials with ID: ${oauthCredentialsId}
+   - Add Service Account key with ID: ${serviceAccountKeyId}
      Type: Secret text
-     Value: JSON content from OAuth client credentials file
-   - Add OAuth token with ID: ${oauthTokenId}
-     Type: Secret text
-     Value: Base64 encoded token.pickle content
+     Value: JSON content from Service Account key file (downloaded from Google Cloud Console)
    
-2. Environment variables:
-   - GOOGLE_DRIVE_OAUTH_CREDENTIALS: JSON string of OAuth client credentials
-   - GOOGLE_DRIVE_OAUTH_TOKEN: Base64 encoded token.pickle content
+2. Environment variable:
+   - GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY: JSON string of Service Account key
 
-3. Files in workspace:
-   - credentials_oauth.json: OAuth client credentials
-   - token.pickle: Saved OAuth token
+3. File in workspace:
+   - service_account_key.json: Service Account key file
 
-See GOOGLE_DRIVE_OAUTH_SETUP.md for detailed instructions.
+To create a Service Account:
+1. Go to Google Cloud Console → IAM & Admin → Service Accounts
+2. Create a new Service Account or use existing one
+3. Enable Google Drive API
+4. Create a JSON key and download it
+5. Share the target Google Drive folder with the Service Account email address
+
+See GOOGLE_DRIVE_SETUP.md for detailed instructions.
                             """)
                         }
                         
