@@ -78,7 +78,7 @@ Có 3 cách để cấu hình credentials trong Jenkins. **Jenkinsfile đã đư
 4. Điền thông tin:
    - **Kind**: `Secret text`
    - **Secret**: Mở file JSON đã tải về, copy toàn bộ nội dung và paste vào đây
-   - **ID**: `google-drive-service-account-json` (⚠️ **Phải đúng ID này** hoặc set environment variable `GOOGLE_DRIVE_CREDENTIALS_ID`)
+   - **ID**: `google-drive-service-account-key` (⚠️ **Phải đúng ID này** hoặc set environment variable `GOOGLE_DRIVE_CREDENTIALS_ID`)
    - **Description**: `Google Drive Service Account JSON for APK upload`
 5. Click **OK**
 
@@ -108,7 +108,7 @@ Có 3 cách để cấu hình credentials trong Jenkins. **Jenkinsfile đã đư
 
 Jenkinsfile sẽ tự động thử các cách theo thứ tự sau:
 
-1. ✅ **Jenkins Credentials Store** (credentials ID: `google-drive-service-account-json` hoặc từ env var `GOOGLE_DRIVE_CREDENTIALS_ID`)
+1. ✅ **Jenkins Credentials Store** (credentials ID: `google-drive-service-account-key` hoặc từ env var `GOOGLE_DRIVE_CREDENTIALS_ID`)
 2. ✅ **Environment variable**: `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` (JSON string)
 3. ✅ **Environment variable**: `GOOGLE_DRIVE_SERVICE_ACCOUNT_FILE` (đường dẫn đến file JSON)
 4. ✅ **File**: `service_account.json` trong workspace root
